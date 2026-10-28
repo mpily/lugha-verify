@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     at_shortcode: str | None = None
     at_sender_id: str | None = None
 
+    # Shared secret added to the AT callback URLs (?token=...). AT does not
+    # sign callbacks, so this is the check we can do. Strongly recommended.
+    at_callback_token: SecretStr | None = None
+
     database_url: str = "sqlite:///./lugha.db"
 
     phone_enc_key: SecretStr
@@ -71,6 +75,14 @@ class Settings(BaseSettings):
             if getattr(self, name) <= 0:
                 raise ValueError(f"{name.upper()} must be > 0")
         return self
+
+    @property
+    def at_sandbox(self) -> bool:
+        return self.at_username == "sandbox"
+
+    @property
+    def at_sender(self) -> str | None:
+        return self.at_shortcode or self.at_sender_id
 
     def needs_review_for(self, lang: str, customer_swahili: bool) -> bool:
         """Delivery-time check: Swahili written by the customer needs no

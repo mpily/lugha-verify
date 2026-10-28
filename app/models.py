@@ -148,8 +148,30 @@ class Delivery(Base):
 class InboundSms(Base):
     __tablename__ = "inbound_sms"
     id: Mapped[int] = mapped_column(primary_key=True)
+    at_id: Mapped[str | None] = mapped_column(String(100), unique=True)  # AT message id
     from_hash: Mapped[str] = mapped_column(String(64), index=True)
     text: Mapped[str] = mapped_column(Text)
     received_at: Mapped[datetime] = mapped_column(DateTime)
     parsed_ok: Mapped[bool] = mapped_column(Boolean)
     error: Mapped[str | None] = mapped_column(String(64))
+
+
+class OutboundSms(Base):
+    """Every SMS we send goes through this queue: the engine writes rows inside
+    its transaction, a sender flushes them to AT after commit."""
+    __tablename__ = "outbound_sms"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    speaker_id: Mapped[int | None] = mapped_column(ForeignKey("speakers.id"), index=True)
+    phone_enc: Mapped[str] = mapped_column(Text)
+    text: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime)
+    # queued|sending|sent|failed
+    status: Mapped[str] = mapped_column(String(16), default="queued", index=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime)
+    at_message_id: Mapped[str | None] = mapped_column(String(100), index=True)
+    at_status: Mapped[str | None] = mapped_column(String(64))
+    cost: Mapped[str | None] = mapped_column(String(32))
+    segments: Mapped[int | None] = mapped_column(Integer)
+    delivery_status: Mapped[str | None] = mapped_column(String(32))
+    failure_reason: Mapped[str | None] = mapped_column(String(64))

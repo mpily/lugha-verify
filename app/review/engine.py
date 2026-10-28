@@ -270,12 +270,14 @@ class ReviewEngine:
         self.db.flush()
 
     # ---------------------------------------------------------------- inbound
-    def handle_inbound(self, phone_hash: str, text: str) -> None:
+    def handle_inbound(self, phone_hash: str, text: str, at_id: str | None = None) -> None:
         now = self.clock()
+        if at_id and self.db.scalar(select(InboundSms).where(InboundSms.at_id == at_id)):
+            return  # AT retried the callback: already handled
         parsed = parse_sms(text)
         prev = self.db.scalars(select(InboundSms).where(InboundSms.from_hash == phone_hash)
                                .order_by(InboundSms.id.desc())).first()
-        self.db.add(InboundSms(from_hash=phone_hash, text=text, received_at=now,
+        self.db.add(InboundSms(at_id=at_id, from_hash=phone_hash, text=text, received_at=now,
                                parsed_ok=not isinstance(parsed, ParseError),
                                error=parsed.reason if isinstance(parsed, ParseError) else None))
         sp = self.db.scalar(select(Speaker).where(Speaker.phone_hash == phone_hash))
