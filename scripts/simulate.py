@@ -208,6 +208,21 @@ def main(argv=None) -> int:
         with app.state.session() as db:
             check(len(db.scalars(select(Delivery)).all()) == 5, "second tick sends nothing")
 
+        print("7. research report")
+        rep = c.get(f"/api/campaigns/{cid}/report", headers=admin).json()
+        rows = {(r["lang"], r["model_ref"]): r for r in rep["rows"]}
+        d1 = rows.get(("dav", "space"))
+        d2 = rows.get(("dav", "fake"))
+        check(d1 is not None and d1["n_replies"] == 1 and d1["stars"]["mean"] == 3.0,
+              "D's rating of the first draft reported")
+        check(d2 is not None and d2["n_replies"] == 2 and d2["low_n"],
+              "B and C's ratings of the re-translated draft reported, flagged low n")
+        check(("swh", "nllb") in rows and rows[("swh", "nllb")]["chrf"]["n"] == 1,
+              "Swahili draft scored (chrF vs E's correction)")
+        for r in rep["rows"]:
+            print(f"       {r['lang']} {r['model_ref']}: items={r['n_items']} "
+                  f"stars={r['stars']['mean']} chrF={r['chrf']['mean'] and round(r['chrf']['mean'], 1)}")
+
     print("PASS" if not failures else f"FAIL ({len(failures)})")
     return 0 if not failures else 1
 

@@ -133,3 +133,15 @@
   Open question for the user: add EN→SW machine translation (Space endpoint
   in the research repo, or another free service) so the Swahili starts from a
   draft?
+- Build step 5b, research report (`app/reports.py`): `GET
+  /api/campaigns/{id}/report` (JSON or `?format=csv`), also on the portal
+  campaign page and as a CSV download. Per language × model (the candidate
+  each speaker actually saw): n items, n replies, mean stars (t 95% CI),
+  ≥4-star rate (Wilson), accept-unchanged rate (Wilson), chrF of candidate vs
+  speaker version (accepted = 100), agreement of the first two replies
+  (Wilson); low_n flag at n_items < 5; from-scratch translations counted
+  separately. chrF is our own implementation (no new image dependency),
+  checked equal to sacrebleu on 6 cases (sacrebleu is test-only).
+- simulate.py PASS incl. report: dav/space 1 reply (3★, chrF 53.9), dav
+  re-translated draft 2 replies (5★, low n), swh 1 reply (chrF 91.3).
+  129 tests pass.

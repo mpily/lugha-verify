@@ -23,6 +23,7 @@ from .exports import (HttpSink, LocalJsonlSink, SharedDataSink, campaign_rows, e
 from .models import Delivery, OutboundSms, Speaker
 from .payouts import ATAirtimeClient, AirtimeClient, airtime_status_callback, flush_payouts
 from .phones import hash_phone
+from .reports import campaign_report, report_csv
 from .review.engine import ReviewEngine
 from .schemas import CampaignIn, SpeakerIn, SpeakerOut
 from .services import (ServiceError, add_speaker, campaign_status, create_campaign,
@@ -246,6 +247,14 @@ def create_app(settings: Settings | None = None, sms_client: SmsClient | None = 
         return PlainTextResponse(to_csv(rows) if format == "csv" else to_jsonl(rows),
                                  media_type="text/csv" if format == "csv"
                                  else "application/x-ndjson")
+
+    @app.get("/api/campaigns/{cid}/report", dependencies=admin)
+    def api_report(cid: int, format: str = Query("json", pattern="^(json|csv)$")):
+        run(lambda db, eng: campaign_status(db, cid))  # 404 if missing
+        rep = run(lambda db, eng: campaign_report(db, cid))
+        if format == "csv":
+            return PlainTextResponse(report_csv(rep), media_type="text/csv")
+        return rep
 
     # ------------------------------------------------------------- portal
     app.include_router(make_router(SimpleNamespace(

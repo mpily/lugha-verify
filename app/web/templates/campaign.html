@@ -11,5 +11,13 @@
 <td>{% if i.final_status %}<span class="b {{ i.final_status }}">{{ i.final_status }}</span><br>{{ i.final_text or "" }}{% elif i.candidate %}<span class="muted">draft: {{ i.candidate }}</span>{% else %}<span class="muted">no draft</span>{% endif %}</td>
 <td>{% for s, n in i.tasks.items() %}{{ s }} {{ n }}{% if not loop.last %}, {% endif %}{% endfor %}</td></tr>
 {% else %}<tr><td colspan="5" class="muted">Nothing needs review.</td></tr>{% endfor %}</table>
+<h2>Machine draft scores</h2>
+{% macro ci(m, pct=False, d=1) %}{% if m.n == 0 %}—{% else %}{{ ((m.rate if pct else m.mean) * (100 if pct else 1))|round(d) }}{{ "%" if pct }}{% if m.ci95 %} <span class="muted">[{{ (m.ci95[0]*(100 if pct else 1))|round(d) }}–{{ (m.ci95[1]*(100 if pct else 1))|round(d) }}]</span>{% endif %} <span class="muted">n={{ m.n }}</span>{% endif %}{% endmacro %}
+{% if rep.rows %}<table><tr><th>Lang / model</th><th>Items</th><th>Stars</th><th>≥4★</th><th>Accepted as is</th><th>chrF</th><th>Agree</th></tr>
+{% for r in rep.rows %}<tr><td>{{ r.lang }} · {{ r.model_ref or r.origin }}{% if r.low_n %} <span class="b">low n</span>{% endif %}</td><td>{{ r.n_items }}</td>
+<td>{{ ci(r.stars, d=2) }}</td><td>{{ ci(r.ge4_rate, true, 0) }}</td><td>{{ ci(r.accept_unchanged, true, 0) }}</td><td>{{ ci(r.chrf) }}</td><td>{{ ci(r.agreement, true, 0) }}</td></tr>{% endfor %}</table>
+<p class="muted">95% intervals in brackets. <a href="/portal/campaigns/{{ c.id }}/export.report.csv">Report CSV</a></p>
+{% else %}<p class="muted">No ratings yet.</p>{% endif %}
+{% if rep.translated_from_scratch %}<p>Translated from scratch: {% for l, n in rep.translated_from_scratch.items() %}{{ l }} n={{ n }}{% if not loop.last %}, {% endif %}{% endfor %}</p>{% endif %}
 <p class="muted">Only <b>verified</b> translations are ever sent to recipients; everything else gets the fallback.</p>
 {% endblock %}

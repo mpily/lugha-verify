@@ -19,6 +19,7 @@ from pydantic import ValidationError
 
 from ..bulk import import_recipients
 from ..exports import campaign_rows, to_csv, to_jsonl
+from ..reports import campaign_report, report_csv
 from ..schemas import CampaignIn, CandidateBody, SourceBody, SpeakerIn
 from ..services import (ServiceError, add_speaker, campaign_status, create_campaign,
                         overview, sources_from_message, start_campaign)
@@ -215,7 +216,8 @@ def make_router(ctx) -> APIRouter:
         except ServiceError as e:
             return page(req, "home.html", e.status, error=e.message,
                         **ctx.run(lambda db, eng: overview(db)))
-        return page(req, "campaign.html", c=c)
+        rep = ctx.run(lambda db, eng: campaign_report(db, cid))
+        return page(req, "campaign.html", c=c, rep=rep)
 
     @r.post("/campaigns/{cid}/start")
     async def start(req: Request, cid: int):
@@ -228,13 +230,18 @@ def make_router(ctx) -> APIRouter:
             ctx.flush()
         except ServiceError as e:
             c = ctx.run(lambda db, eng: campaign_status(db, cid))
-            return page(req, "campaign.html", e.status, error=e.message, c=c)
+            rep = ctx.run(lambda db, eng: campaign_report(db, cid))
+            return page(req, "campaign.html", e.status, error=e.message, c=c, rep=rep)
         return RedirectResponse(f"/portal/campaigns/{cid}", status_code=303)
 
-    @r.get("/campaigns/{cid}/export.{fmt}")
+    @r.get("/campaigns/{cid}/export.{fmt:path}")
     def export(req: Request, cid: int, fmt: str):
         if not authed(req):
             return login_redirect()
+        if fmt == "report.csv":
+            body = report_csv(ctx.run(lambda db, eng: campaign_report(db, cid)))
+            return PlainTextResponse(body, media_type="text/csv", headers={
+                "Content-Disposition": f'attachment; filename="campaign-{cid}-report.csv"'})
         if fmt not in ("csv", "jsonl"):
             return PlainTextResponse("csv or jsonl", status_code=404)
         rows = ctx.run(lambda db, eng: campaign_rows(db, cid))
