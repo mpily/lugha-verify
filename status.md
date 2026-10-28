@@ -43,3 +43,19 @@
   Swahili item so multilingual speakers go to the target language first.
   Open: if the Swahili reviewer corrects the Swahili, the Kitaita candidate was
   still made from the uncorrected machine Swahili (re-translate? step 5).
+- Build step 2 done: SMS outbox table (`outbound_sms`; rows written inside the
+  engine's transaction, sent after commit, marked `sending` before each AT call
+  so a crash can't double-send; network errors retried up to 5 times), AT SMS
+  client (`app/sms/at_client.py`), FastAPI app (`app/main.py`):
+  `POST /at/sms/inbound` (idempotent on AT's message id), `POST /at/sms/delivery`,
+  admin `POST /api/speakers` (sends the opt-in prompt), `POST /api/campaigns`,
+  `POST /api/campaigns/{id}/start`, `GET /api/campaigns/{id}`, `GET /health`;
+  in-process scheduler (tick + flush every 30 s).
+- AT callbacks are checked with a shared `?token=` (`AT_CALLBACK_TOKEN`), since
+  AT doesn't sign callbacks. New env var.
+- `scripts/simulate.py` (offline): the A/B/C/D/E pivot scenario end to end
+  through the HTTP callbacks — PASS (20/20 SMS, 28 segments). 82 tests pass.
+- NOT yet run: `simulate.py --live` against the AT sandbox.
+  developers.africastalking.com and the AT API are blocked by this build
+  session's network policy, so the client follows AT's documented
+  `version1/messaging` form API from memory; first live run must confirm it.
