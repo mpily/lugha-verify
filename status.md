@@ -71,3 +71,14 @@
   backoff for up to 3 min, then gives no candidate; it shows reviewers
   `kitaita_marked` so untranslated words appear as `[?word]`.
 - Trusted speaker's late reply counting as a paid stage-2 reply: confirmed.
+- Build step 3a, airtime payouts (`app/payouts.py`): one row per task (unique),
+  committed as `sending` before the AT call and updated with AT's requestId
+  after. Retried only when AT certainly didn't pay (connection never opened,
+  or AT's status callback says Failed; max 3 attempts). Ambiguous errors
+  (timeout after sending, 5xx, crash) → `unknown`, never auto-retried:
+  reconcile against the AT dashboard. A row stuck in `sending` means the
+  process died mid-call: same treatment. `POST /at/airtime/status` callback;
+  duplicates are no-ops; `airtime_paid_total` grows on confirmed Success only.
+  Settings now require PAYOUT_PER_ITEM_KES/2 >= 10 (AT airtime minimum).
+  Request format (`recipients` JSON list, "KES 50") written from memory —
+  confirm on the first sandbox run.

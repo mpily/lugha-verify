@@ -16,6 +16,7 @@ from sqlalchemy import select
 from .config import Settings
 from .db import Base, make_session_factory
 from .models import Campaign, OutboundSms, ReviewItem, SourceText, Speaker
+from .payouts import ATAirtimeClient, AirtimeClient, airtime_status_callback, flush_payouts
 from .phones import encrypt_phone, hash_phone
 from .review.engine import ReviewEngine
 from .review.setup import CandidateIn, create_review_items
@@ -73,7 +74,8 @@ class CampaignIn(BaseModel):
 def create_app(settings: Settings | None = None, sms_client: SmsClient | None = None,
                clock: Callable[[], datetime] = utcnow,
                start_scheduler: bool = True,
-               translator: Translator | None = None) -> FastAPI:
+               translator: Translator | None = None,
+               airtime_client: AirtimeClient | None = None) -> FastAPI:
     settings = settings or Settings()  # fails fast on bad/missing env vars
     engine, Session = make_session_factory(settings.database_url)
     Base.metadata.create_all(engine)  # TODO(step): Alembic migrations
@@ -81,6 +83,8 @@ def create_app(settings: Settings | None = None, sms_client: SmsClient | None = 
                                         settings.at_api_key.get_secret_value(),
                                         settings.at_sender, settings.at_sandbox)
     translator = translator or DefaultApiTranslator(settings.translate_api_url)
+    airtime_client = airtime_client or ATAirtimeClient(
+        settings.at_username, settings.at_api_key.get_secret_value(), settings.at_sandbox)
     key = settings.phone_enc_key.get_secret_value()
     salt = settings.phone_hash_salt.get_secret_value()
     lock = threading.RLock()  # one writer at a time (inbound vs scheduler)
@@ -95,7 +99,9 @@ def create_app(settings: Settings | None = None, sms_client: SmsClient | None = 
 
     def flush():
         with lock, Session() as db:
-            return flush_outbox(db, sms_client, key, clock)
+            n = flush_outbox(db, sms_client, key, clock)
+            flush_payouts(db, airtime_client, key, clock)
+            return n
 
     def tick():
         run(lambda db, eng: eng.tick())
@@ -176,6 +182,11 @@ def create_app(settings: Settings | None = None, sms_client: SmsClient | None = 
                 row.failure_reason = (failureReason or None) and failureReason[:64]
         run(upd)
         return {"ok": True}
+
+    @app.post("/at/airtime/status", dependencies=[Depends(check_callback)])
+    def airtime_status(requestId: str = Form(...), status: str = Form(...)):
+        changed = run(lambda db, eng: airtime_status_callback(db, requestId, status, clock))
+        return {"ok": True, "changed": changed}
 
     # ---------------------------------------------------------- admin API
     def speaker_out(sp: Speaker) -> SpeakerOut:

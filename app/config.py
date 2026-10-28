@@ -68,6 +68,9 @@ class Settings(BaseSettings):
         if self.payout_per_item_kes < 2 or self.payout_per_item_kes % 2:
             raise ValueError("PAYOUT_PER_ITEM_KES must be an even number >= 2 "
                              "(it is split between two responders)")
+        if self.payout_per_item_kes // 2 < 10:
+            raise ValueError("PAYOUT_PER_ITEM_KES / 2 must be >= 10 "
+                             "(AT airtime minimum is KES 10)")
         if not 0 <= self.gold_rate < 1 or not 0 <= self.min_accept_rate <= 1:
             raise ValueError("GOLD_RATE must be in [0,1), MIN_ACCEPT_RATE in [0,1]")
         for name in ("trusted_timeout_min", "speaker_timeout_min",

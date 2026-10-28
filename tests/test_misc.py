@@ -20,6 +20,8 @@ def test_settings_fail_fast():
         make_settings(at_shortcode=None)
     with pytest.raises(ValidationError):
         make_settings(payout_per_item_kes=99)
+    with pytest.raises(ValidationError):
+        make_settings(payout_per_item_kes=18)
 
 
 def test_phones():

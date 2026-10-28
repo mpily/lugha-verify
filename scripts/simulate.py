@@ -32,6 +32,7 @@ from sqlalchemy import select  # noqa: E402
 from app.config import Settings  # noqa: E402
 from app.main import create_app  # noqa: E402
 from app.models import OutboundSms, Payout, ReviewTask, Translation  # noqa: E402
+from app.payouts import FakeAirtimeClient  # noqa: E402
 from app.sms.at_client import FakeSmsClient  # noqa: E402
 from app.translators.base import FakeTranslator  # noqa: E402
 
@@ -68,17 +69,17 @@ def main(argv=None) -> int:
         if not settings.at_sandbox:
             print("refusing --live outside the sandbox (AT_USERNAME must be 'sandbox')")
             return 2
-        client = None  # real ATClient
+        client = air = None  # real AT clients
     else:
         settings = Settings(_env_file=None, at_username="sandbox", at_api_key="x",
                             at_shortcode="12345", phone_enc_key=Fernet.generate_key().decode(),
                             phone_hash_salt="sim", admin_token="sim",
                             database_url="sqlite://")
-        client = FakeSmsClient()
+        client, air = FakeSmsClient(), FakeAirtimeClient()
     # The translator is always simulated: the Space is a separate service.
     translator = FakeTranslator({(SW_FIXED, "dav"): DAV2})
     app = create_app(settings, sms_client=client, clock=clock, start_scheduler=False,
-                     translator=translator)
+                     translator=translator, airtime_client=air)
     admin = {"Authorization": "Bearer " + settings.admin_token.get_secret_value()}
     tok = settings.at_callback_token
     q = f"?token={tok.get_secret_value()}" if tok else ""
@@ -172,6 +173,8 @@ def main(argv=None) -> int:
             pays = sorted((p.speaker_id, p.amount_kes) for p in db.scalars(select(Payout)))
             want = sorted([(ids["D"], 50), (ids["B"], 50), (ids["E"], 50)])
             check(pays == want, f"payouts {pays}")
+            st_ = {p.status for p in db.scalars(select(Payout))}
+            check(st_ == {"sent"}, f"airtime sent for every payout ({st_})")
             trs = {t.lang: t.status for t in db.scalars(select(Translation))}
             check(trs == {"dav": "verified", "swh": "speaker_corrected"}, f"translations {trs}")
             rows = db.scalars(select(OutboundSms)).all()

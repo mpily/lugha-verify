@@ -132,8 +132,13 @@ class Payout(Base):
     review_task_id: Mapped[int] = mapped_column(ForeignKey("review_tasks.id"), unique=True)
     speaker_id: Mapped[int] = mapped_column(ForeignKey("speakers.id"), index=True)
     amount_kes: Mapped[int] = mapped_column(Integer)
-    at_transaction_id: Mapped[str | None] = mapped_column(String(100))
-    status: Mapped[str] = mapped_column(String(16), default="pending")
+    at_transaction_id: Mapped[str | None] = mapped_column(String(100), index=True)
+    # pending -> sending -> sent -> success | failed;  unknown = AT may or may
+    # not have paid (ambiguous network error): never retried automatically.
+    status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[str | None] = mapped_column(String(100))
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime)
 
 
 class Delivery(Base):

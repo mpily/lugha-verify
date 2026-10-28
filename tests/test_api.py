@@ -3,6 +3,7 @@ from sqlalchemy import select
 
 from app.main import create_app
 from app.models import InboundSms, OutboundSms, Speaker
+from app.payouts import FakeAirtimeClient
 from app.sms.at_client import FakeSmsClient, parse_send_response
 from tests.conftest import Clock, make_settings
 
@@ -14,7 +15,8 @@ def make(**kw):
     s = make_settings(**kw)
     sms = FakeSmsClient()
     clock = Clock()
-    app = create_app(s, sms_client=sms, clock=clock, start_scheduler=False)
+    app = create_app(s, sms_client=sms, clock=clock, start_scheduler=False,
+                     airtime_client=FakeAirtimeClient())
     return app, TestClient(app), sms, clock
 
 
