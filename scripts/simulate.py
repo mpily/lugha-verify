@@ -31,13 +31,15 @@ from sqlalchemy import select  # noqa: E402
 
 from app.config import Settings  # noqa: E402
 from app.main import create_app  # noqa: E402
-from app.models import OutboundSms, Payout, ReviewTask, Translation  # noqa: E402
+from app.models import Delivery, OutboundSms, Payout, ReviewTask, Translation  # noqa: E402
 from app.payouts import FakeAirtimeClient  # noqa: E402
 from app.sms.at_client import FakeSmsClient  # noqa: E402
 from app.translators.base import FakeTranslator  # noqa: E402
 
 PHONES = {"B": "+254711000001", "C": "+254711000002",
           "D": "+254711000003", "E": "+254711000004"}
+RECIPIENTS = {"+254722000001": "eng", "+254722000002": "eng", "+254722000003": "swh",
+              "+254722000004": "dav", "+254722000005": "dav", "+254722000006": "dav"}
 LANGS = {"B": ["swh", "dav"], "C": ["swh", "dav"],
          "D": ["eng", "swh", "dav"], "E": ["eng", "swh"]}
 EN = "Wash your hands with soap before eating food"
@@ -124,9 +126,13 @@ def main(argv=None) -> int:
             sms(who, "YES")
             check(r.status_code == 200 and "You're in" in last_sms(who), f"{who} opted in")
 
-        print("2. English-only campaign: machine Swahili + Kidaw'ida candidates")
+        print("2. recipient list + English-only campaign (machine Swahili, Kidaw'ida)")
+        csv_ = "phone,preferred_lang\n" + "\n".join(f"{p},{l}" for p, l in RECIPIENTS.items())
+        r = c.post("/api/lists/clinic/recipients", headers=admin, content=csv_)
+        check(r.json()["added"] == 6 and r.json()["invalid_lines"] == [], "6 recipients uploaded")
+        c.post(f"/at/sms/inbound{q}", data={"from": "+254722000006", "text": "STOP", "id": "r1"})
         r = c.post("/api/campaigns", headers=admin, json={
-            "mode": "bulk", "source_lang": "eng", "fallback_lang": "eng",
+            "mode": "bulk", "source_lang": "eng", "fallback_lang": "eng", "list_id": "clinic",
             "sources": [{"text": EN, "candidates": {
                 "swh": {"text": SW, "origin": "default_api", "model_ref": "nllb"},
                 "dav": {"text": DAV, "origin": "default_api", "model_ref": "space"}}}]})
@@ -182,7 +188,25 @@ def main(argv=None) -> int:
             check(sent == len(rows), f"{sent}/{len(rows)} SMS sent "
                                      f"({sum(r.segments or 0 for r in rows)} segments)")
             raw = " ".join(str(v) for r in rows for v in (r.phone_enc, r.text))
-            check(not any(p in raw for p in PHONES.values()), "no plain phone numbers stored")
+            check(not any(p in raw for p in [*PHONES.values(), *RECIPIENTS]),
+                  "no plain phone numbers stored")
+
+        print("6. delivery: verified Kidaw'ida; unverified Swahili falls back to English")
+        check(st["status"] == "delivered", f"campaign {st['status']}")
+        check(st["deliveries"] == {"eng": {"n": 3, "fallback": 1, "delivered": 0},
+                                   "dav": {"n": 2, "fallback": 0, "delivered": 0}},
+              f"deliveries {st['deliveries']}")
+        with app.state.session() as db:
+            got = {d.recipient_id: (d.lang_sent, d.text_sent, d.was_fallback)
+                   for d in db.scalars(select(Delivery))}
+        texts = {t for _, t, _ in got.values()}
+        check(texts == {EN, DAV2}, f"texts sent {texts}")
+        check(SW not in texts and SW_FIXED not in texts and DAV not in texts,
+              "no unverified text delivered")
+        check(len(got) == 5, "opted-out recipient skipped")
+        app.state.tick()
+        with app.state.session() as db:
+            check(len(db.scalars(select(Delivery)).all()) == 5, "second tick sends nothing")
 
     print("PASS" if not failures else f"FAIL ({len(failures)})")
     return 0 if not failures else 1

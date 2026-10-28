@@ -9,18 +9,21 @@ import threading
 from datetime import UTC, datetime, timedelta
 from typing import Callable, Literal
 
-from fastapi import BackgroundTasks, Depends, FastAPI, Form, Header, HTTPException, Query
+from fastapi import (BackgroundTasks, Depends, FastAPI, Form, Header, HTTPException, Query,
+                     Request)
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
+from .bulk import finish_campaigns, import_recipients, list_languages, recipient_keyword
 from .config import Settings
 from .db import Base, make_session_factory
-from .models import Campaign, OutboundSms, ReviewItem, SourceText, Speaker
+from .models import Campaign, Delivery, OutboundSms, ReviewItem, SourceText, Speaker
 from .payouts import ATAirtimeClient, AirtimeClient, airtime_status_callback, flush_payouts
 from .phones import encrypt_phone, hash_phone
 from .review.engine import ReviewEngine
 from .review.setup import CandidateIn, create_review_items
 from .sms import templates as T
+from .sms.parser import Keyword, parse_sms
 from .sms.at_client import ATClient, SmsClient
 from .sms.outbox import DbOutbox, flush_outbox
 from .translators.base import Translator
@@ -68,6 +71,7 @@ class CampaignIn(BaseModel):
     source_lang: Literal["eng", "swh"] = "eng"
     fallback_lang: Literal["eng", "swh"] = "eng"
     review_deadline_min: int | None = Field(None, gt=0)
+    list_id: str | None = None  # required in bulk mode
     sources: list[SourceBody] = Field(min_length=1)
 
 
@@ -104,7 +108,10 @@ def create_app(settings: Settings | None = None, sms_client: SmsClient | None = 
             return n
 
     def tick():
-        run(lambda db, eng: eng.tick())
+        def do(db, eng):
+            eng.tick()
+            finish_campaigns(db, settings, eng.outbox, clock)
+        run(do)
         flush()
 
     def retranslate():
@@ -168,7 +175,13 @@ def create_app(settings: Settings | None = None, sms_client: SmsClient | None = 
             h = hash_phone(from_, salt)
         except ValueError:
             return {"ok": False}
-        run(lambda db, eng: eng.handle_inbound(h, text, at_id=id))
+        def do(db, eng):
+            is_speaker = db.scalar(select(Speaker.id).where(Speaker.phone_hash == h))
+            eng.handle_inbound(h, text, at_id=id)
+            parsed = parse_sms(text)
+            if is_speaker is None and isinstance(parsed, Keyword):
+                recipient_keyword(db, h, parsed.word, eng.outbox, clock)
+        run(do)
         bg.add_task(flush)
         return {"ok": True}
 
@@ -180,6 +193,8 @@ def create_app(settings: Settings | None = None, sms_client: SmsClient | None = 
             if row is not None:
                 row.delivery_status = status[:32]
                 row.failure_reason = (failureReason or None) and failureReason[:64]
+                if row.delivery_id is not None:
+                    db.get(Delivery, row.delivery_id).delivery_status = status[:32]
         run(upd)
         return {"ok": True}
 
@@ -217,22 +232,46 @@ def create_app(settings: Settings | None = None, sms_client: SmsClient | None = 
         bg.add_task(flush)
         return out
 
+    @app.post("/api/lists/{list_id}/recipients", dependencies=[Depends(check_admin)])
+    async def upload_recipients(list_id: str, request: Request):
+        """Body: CSV text, columns `phone, preferred_lang`."""
+        if not (1 <= len(list_id) <= 64):
+            raise HTTPException(422, "bad list id")
+        body = (await request.body()).decode("utf-8-sig", errors="replace")
+        return await asyncio.to_thread(
+            run, lambda db, eng: import_recipients(db, settings, list_id, body))
+
     @app.post("/api/campaigns", dependencies=[Depends(check_admin)])
     def create_campaign(body: CampaignIn):
         def do(db, eng):
             now = clock()
+            needed: set[str] = set()
+            if body.mode == "bulk":
+                langs = list_languages(db, body.list_id) if body.list_id else set()
+                if not langs:
+                    raise HTTPException(422, "bulk mode needs list_id of an uploaded list")
+                needed = {x for x in langs if x != body.source_lang
+                          and settings.needs_review_for(x, False)}
             mins = body.review_deadline_min or settings.review_deadline_min
             c = Campaign(mode=body.mode, source_lang=body.source_lang,
                          fallback_lang=body.fallback_lang, created_at=now,
-                         review_deadline=now + timedelta(minutes=mins), status="draft")
+                         review_deadline=now + timedelta(minutes=mins), status="draft",
+                         list_id=body.list_id)
             db.add(c)
             n = 0
             for sb in body.sources:
                 st = SourceText(campaign=c, text=sb.text, swahili_text=sb.swahili_text)
                 db.add(st)
-                n += len(create_review_items(db, settings, st, {
-                    lang.lower(): CandidateIn(cb.text, cb.origin, cb.model_ref)
-                    for lang, cb in sb.candidates.items()}))
+                cands = {lang.lower(): CandidateIn(cb.text, cb.origin, cb.model_ref)
+                         for lang, cb in sb.candidates.items()}
+                want = set(needed)
+                if want - {"swh"} and body.source_lang != "swh" and not sb.swahili_text:
+                    want.add("swh")  # pivot for reviewers who don't read the source
+                for lang in want - set(cands):
+                    # no candidate yet: speakers translate from scratch
+                    # (TODO step 5: ask the translator first)
+                    cands[lang] = CandidateIn(None, "default_api", None)
+                n += len(create_review_items(db, settings, st, cands))
             db.flush()
             return {"id": c.id, "review_items": n}
         return run(do)
@@ -253,6 +292,7 @@ def create_app(settings: Settings | None = None, sms_client: SmsClient | None = 
             c.review_deadline = clock() + (c.review_deadline - c.created_at)
             c.status = "running"
             eng.start_items(list(items_of(db, cid)))
+            finish_campaigns(db, settings, eng.outbox, clock)  # nothing to review
             return {"id": cid, "status": c.status}
         out = run(do)
         bg.add_task(flush)
@@ -265,7 +305,15 @@ def create_app(settings: Settings | None = None, sms_client: SmsClient | None = 
             if c is None:
                 raise HTTPException(404, "no such campaign")
             items = items_of(db, cid)
+            ds = db.scalars(select(Delivery).where(Delivery.campaign_id == cid)).all()
+            summary: dict[str, dict] = {}
+            for d in ds:
+                k = summary.setdefault(d.lang_sent, {"n": 0, "fallback": 0, "delivered": 0})
+                k["n"] += 1
+                k["fallback"] += d.was_fallback
+                k["delivered"] += d.delivery_status == "Success"
             return {"id": cid, "status": c.status, "review_deadline": c.review_deadline,
+                    "deliveries": summary,
                     "items": [{"id": i.id, "lang": i.lang, "state": i.state,
                                "outcome": i.outcome, "source_id": i.candidate.source_id,
                                "tasks": {s: sum(t.status == s for t in i.tasks)

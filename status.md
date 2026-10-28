@@ -82,3 +82,21 @@
   Settings now require PAYOUT_PER_ITEM_KES/2 >= 10 (AT airtime minimum).
   Request format (`recipients` JSON list, "KES 50") written from memory —
   confirm on the first sandbox run.
+- Build step 3b, bulk delivery (`app/bulk.py`, `compose_message` in
+  `app/delivery.py`): `POST /api/lists/{id}/recipients` (CSV `phone,
+  preferred_lang`; bad rows reported by line number only). Bulk campaigns need
+  a `list_id`; review items are created for every review-required language in
+  the list (plus the machine-Swahili pivot when the source is English and no
+  customer Swahili is given); languages with no uploaded candidate get a
+  no-candidate item for now (step 5: ask the translator first). When all items
+  are closed, each recipient gets one SMS (unique per campaign+recipient).
+  Message rule: every sentence passes `choose_delivery_text`; if any sentence
+  would fall back, the WHOLE message goes in the fallback (Swahili only if
+  every sentence has customer or verified Swahili, else the source language).
+  Hypothesis test at message level. Recipients can STOP/YES. Delivery reports
+  update `deliveries.delivery_status` (send result is stored as `sent`, AT's
+  report as e.g. `Success`). Research campaigns end as `done`, no delivery.
+- simulate.py offline: PASS, now including a 6-recipient list (one STOPs):
+  2 Kidaw'ida recipients got the verified text, the Swahili recipient got the
+  English fallback (Swahili had only one reply), nothing unverified sent.
+  104 tests pass.

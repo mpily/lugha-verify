@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import (JSON, Boolean, DateTime, ForeignKey, Integer, String, Text,
+                        UniqueConstraint)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
@@ -40,6 +41,7 @@ class Recipient(Base):
     phone_enc: Mapped[str] = mapped_column(Text)
     preferred_lang: Mapped[str] = mapped_column(String(8))
     list_id: Mapped[str] = mapped_column(String(64), index=True)
+    opted_out_at: Mapped[datetime | None] = mapped_column(DateTime)
 
 
 class Campaign(Base):
@@ -50,7 +52,9 @@ class Campaign(Base):
     fallback_lang: Mapped[str] = mapped_column(String(8))
     created_at: Mapped[datetime] = mapped_column(DateTime)
     review_deadline: Mapped[datetime] = mapped_column(DateTime)
+    # draft -> running -> delivered (bulk) | done (research)
     status: Mapped[str] = mapped_column(String(16), default="draft")
+    list_id: Mapped[str | None] = mapped_column(String(64))  # bulk mode
 
 
 class SourceText(Base):
@@ -143,6 +147,7 @@ class Payout(Base):
 
 class Delivery(Base):
     __tablename__ = "deliveries"
+    __table_args__ = (UniqueConstraint("campaign_id", "recipient_id"),)  # once each
     id: Mapped[int] = mapped_column(primary_key=True)
     campaign_id: Mapped[int] = mapped_column(ForeignKey("campaigns.id"), index=True)
     recipient_id: Mapped[int] = mapped_column(ForeignKey("recipients.id"))
@@ -172,6 +177,7 @@ class OutboundSms(Base):
     __tablename__ = "outbound_sms"
     id: Mapped[int] = mapped_column(primary_key=True)
     speaker_id: Mapped[int | None] = mapped_column(ForeignKey("speakers.id"), index=True)
+    delivery_id: Mapped[int | None] = mapped_column(ForeignKey("deliveries.id"), index=True)
     phone_enc: Mapped[str] = mapped_column(Text)
     text: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime)
