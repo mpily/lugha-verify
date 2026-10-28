@@ -1,0 +1,21 @@
+{% extends "base.html" %}{% block body %}
+<h1>New campaign</h1>
+<h2>Bulk: send a message</h2>
+<form method="post" action="/portal/campaigns"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="mode" value="bulk">
+<label>Recipient list<select name="list_id" required>{% for l in lists %}<option>{{ l.id }}</option>{% endfor %}</select></label>
+<label>Message language<select name="source_lang"><option value="eng">English</option><option value="swh">Kiswahili</option></select></label>
+<label>Message<textarea name="message" rows="4" required></textarea></label>
+<label>Kiswahili version (optional, sentence by sentence)<textarea name="swahili" rows="4"></textarea></label>
+<label>If a translation is not verified in time, send<select name="fallback_lang"><option value="eng">English</option><option value="swh">Kiswahili (when available)</option></select></label>
+<label>Review time (minutes)<input name="review_deadline_min" type="number" min="5" value="{{ default_deadline }}"></label>
+<button>Create (review starts when you press Start)</button></form>
+<h2>Research: evaluate translations</h2>
+<form method="post" action="/portal/campaigns" enctype="multipart/form-data"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="mode" value="research">
+<p class="muted">CSV with columns <code>source, lang, candidate</code>; leave candidate empty to ask speakers for a translation.</p>
+<label>Source language<select name="source_lang"><option value="eng">English</option><option value="swh">Kiswahili</option></select></label>
+<label>Model name (for the report)<input name="model_ref" maxlength="200"></label>
+<label>CSV file<input type="file" name="file" accept=".csv,text/csv"></label>
+<label>…or paste CSV<textarea name="csv_text" rows="5"></textarea></label>
+<label>Review time (minutes)<input name="review_deadline_min" type="number" min="5" value="{{ default_deadline }}"></label>
+<button>Create</button></form>
+{% endblock %}

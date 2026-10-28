@@ -100,3 +100,23 @@
   2 Kidaw'ida recipients got the verified text, the Swahili recipient got the
   English fallback (Swahili had only one reply), nothing unverified sent.
   104 tests pass.
+- Build step 4, customer portal (`app/web/portal.py`, Jinja2 templates):
+  login with ADMIN_TOKEN (HttpOnly SameSite=Strict cookie holding an HMAC of
+  the token, CSRF value on every form), recipient-list upload (file or
+  paste), speakers (add → opt-in SMS; list with status, accept rate with n,
+  airtime paid), new campaign (bulk: message split into sentences, optional
+  Swahili paired sentence by sentence or kept whole if counts differ;
+  research: CSV `source, lang, candidate` + model name), campaign page
+  (start, per sentence × language state/result, deliveries, airtime total),
+  export CSV/JSONL. No JavaScript; pages < 8 KB; checked at 375 px width
+  (no horizontal scroll). Shared logic moved to `app/services.py` so the
+  REST API and portal call the same code; `GET /api/campaigns/{id}/export`.
+- Consent export (`app/exports.py`, never-cut item): only tasks with SHARE,
+  on closed items, as anonymous records (no phone, speaker id, campaign or
+  task id; stable HMAC record id for de-duplication). Goes to
+  `SHARED_DATA_URL` if the customer set it, else local `shared_data.jsonl`.
+  Runs every 5 min; Hypothesis test that non-consented tasks never appear.
+  Open: shared records include the source sentence the speaker saw (the
+  customer's text). The customer opts in by setting SHARED_DATA_URL; confirm
+  that is enough or add an explicit per-campaign customer switch.
+- 113 tests pass; simulate.py PASS. No login rate limiting yet.

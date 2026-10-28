@@ -1,0 +1,15 @@
+{% extends "base.html" %}{% block body %}
+<h1>Campaign {{ c.id }} <span class="b">{{ c.mode }}</span> <span class="b">{{ c.status }}</span></h1>
+<p>{% if c.list_id %}List <b>{{ c.list_id }}</b>. {% endif %}Review deadline {{ c.review_deadline.strftime('%Y-%m-%d %H:%M') }} UTC. Airtime: KSh {{ c.airtime_kes }}.</p>
+{% if c.status == "draft" %}<form method="post" action="/portal/campaigns/{{ c.id }}/start"><input type="hidden" name="csrf" value="{{ csrf }}"><button>Start review</button></form>{% endif %}
+<p><a href="/portal/campaigns/{{ c.id }}">Refresh</a> · Export <a href="/portal/campaigns/{{ c.id }}/export.csv">CSV</a> · <a href="/portal/campaigns/{{ c.id }}/export.jsonl">JSONL</a></p>
+{% if c.deliveries %}<h2>Delivered</h2><table><tr><th>Language</th><th>Sent</th><th>Fallback</th><th>Delivered</th></tr>
+{% for lang, d in c.deliveries.items() %}<tr><td>{{ lang }}</td><td>{{ d.n }}</td><td>{{ d.fallback }}</td><td>{{ d.delivered }}</td></tr>{% endfor %}</table>{% endif %}
+<h2>Review</h2>
+<table><tr><th>Sentence</th><th>Lang</th><th>State</th><th>Result</th><th>Replies</th></tr>
+{% for i in c["items"] %}<tr><td>{{ i.source_text }}</td><td>{{ i.lang }}</td><td>{{ {"new":"waiting","trusted":"with trusted reviewer","fanout":"with reviewers","closed":"done"}.get(i.state, i.state) }}</td>
+<td>{% if i.final_status %}<span class="b {{ i.final_status }}">{{ i.final_status }}</span><br>{{ i.final_text or "" }}{% elif i.candidate %}<span class="muted">draft: {{ i.candidate }}</span>{% else %}<span class="muted">no draft</span>{% endif %}</td>
+<td>{% for s, n in i.tasks.items() %}{{ s }} {{ n }}{% if not loop.last %}, {% endif %}{% endfor %}</td></tr>
+{% else %}<tr><td colspan="5" class="muted">Nothing needs review.</td></tr>{% endfor %}</table>
+<p class="muted">Only <b>verified</b> translations are ever sent to recipients; everything else gets the fallback.</p>
+{% endblock %}

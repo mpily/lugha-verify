@@ -115,6 +115,7 @@ class ReviewTask(Base):
     shown_source_text: Mapped[str | None] = mapped_column(Text)
     # The candidate this speaker rated (it can change after re-translation).
     shown_candidate_text: Mapped[str | None] = mapped_column(Text)
+    shared_at: Mapped[datetime | None] = mapped_column(DateTime)  # sent to shared dataset
     item: Mapped[ReviewItem] = relationship(back_populates="tasks")
     speaker: Mapped[Speaker] = relationship()
 

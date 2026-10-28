@@ -1,0 +1,15 @@
+{% extends "base.html" %}{% block body %}
+<h1>Speakers</h1>
+<p class="muted">New speakers get an SMS asking them to reply YES before they receive any task.</p>
+<form method="post" action="/portal/speakers"><input type="hidden" name="csrf" value="{{ csrf }}">
+<label>Phone<input name="phone" required inputmode="tel"></label>
+<label>Languages, most preferred first (e.g. <code>eng, swh, dav</code>)<input name="languages" required></label>
+<label>Trusted reviewer for (optional, e.g. <code>dav</code>)<input name="trusted_for"></label>
+<button>Add speaker</button></form>
+<h2>Registered</h2>
+<table><tr><th>#</th><th>Languages</th><th>Trusted</th><th>Status</th><th>Accept rate</th><th>Paid KSh</th></tr>
+{% for s in speakers %}<tr><td>{{ s.id }}</td><td>{{ s.languages|join(", ") }}</td><td>{{ s.trusted_for|join(", ") }}</td>
+<td>{% if s.opted_out_at %}opted out{% elif s.opted_in_at %}active{% else %}awaiting YES{% endif %}</td>
+<td>{% if s.accept_rate is not none %}{{ (s.accept_rate*100)|round|int }}% (n={{ s.accept_count + s.reject_count }}){% else %}—{% endif %}</td>
+<td>{{ s.airtime_paid_total }}</td></tr>{% else %}<tr><td colspan="6" class="muted">None yet.</td></tr>{% endfor %}</table>
+{% endblock %}

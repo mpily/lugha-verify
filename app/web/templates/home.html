@@ -1,0 +1,9 @@
+{% extends "base.html" %}{% block body %}
+<h1>Campaigns</h1>
+{% if campaigns %}<table><tr><th>#</th><th>Mode</th><th>Status</th><th>Created (UTC)</th></tr>
+{% for c in campaigns %}<tr><td><a href="/portal/campaigns/{{ c.id }}">{{ c.id }}</a></td><td>{{ c.mode }}</td><td>{{ c.status }}</td><td>{{ c.created_at.strftime('%Y-%m-%d %H:%M') }}</td></tr>{% endfor %}</table>
+{% else %}<p class="muted">No campaigns yet. <a href="/portal/campaigns/new">Create one</a>.</p>{% endif %}
+<h2>Recipient lists</h2>
+{% for l in lists %}<p>{{ l.id }}: {{ l.n }} recipients{% if l.opted_out %} ({{ l.opted_out }} opted out){% endif %}</p>{% else %}<p class="muted">None. <a href="/portal/lists">Upload one</a>.</p>{% endfor %}
+<h2>Speakers</h2><p>{{ speakers|length }} registered, {{ speakers|selectattr("opted_in_at")|rejectattr("opted_out_at")|list|length }} active. <a href="/portal/speakers">Manage</a></p>
+{% endblock %}
