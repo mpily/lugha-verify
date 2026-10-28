@@ -223,7 +223,8 @@ def make_router(ctx) -> APIRouter:
             return login_redirect()
         try:
             await checked_form(req)
-            ctx.run(lambda db, eng: start_campaign(db, eng, ctx.settings, ctx.clock, cid))
+            ctx.run(lambda db, eng: start_campaign(db, eng, ctx.settings, ctx.clock, cid,
+                                                   ctx.supports))
             ctx.flush()
         except ServiceError as e:
             c = ctx.run(lambda db, eng: campaign_status(db, cid))

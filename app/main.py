@@ -84,6 +84,26 @@ def create_app(settings: Settings | None = None, sms_client: SmsClient | None = 
         run(do)
         flush()
 
+    def draft():
+        """First machine drafts for items in 'drafting' (outside the lock;
+        the Space may take minutes to wake). No result -> no candidate."""
+        jobs = run(lambda db, eng: eng.pending_drafts(translator.supports))
+        for item_id, src, text, lang in jobs:
+            res_text = ref = None
+            if src is not None:
+                try:
+                    res = translator.translate(text, src, lang)
+                    res_text, ref = res.text, res.model_ref
+                except Exception:  # noqa: BLE001
+                    log.exception("draft translation failed")
+            run(lambda db, eng: eng.apply_draft(item_id, res_text, ref))
+        if jobs:
+            flush()
+        return len(jobs)
+
+    def machine_jobs():
+        return draft() + retranslate()
+
     def retranslate():
         """Re-make candidates from reviewed Swahili. The translator call can
         take minutes (Space asleep), so it runs outside the lock."""
@@ -116,7 +136,7 @@ def create_app(settings: Settings | None = None, sms_client: SmsClient | None = 
                             log.exception("%s failed", fn.__name__)
                         await asyncio.sleep(seconds)
                 return asyncio.create_task(loop())
-            tasks = [every(tick, TICK_SECONDS), every(retranslate, 10), every(share, 300)]
+            tasks = [every(tick, TICK_SECONDS), every(machine_jobs, 10), every(share, 300)]
         yield
         for t in tasks:
             t.cancel()
@@ -124,6 +144,7 @@ def create_app(settings: Settings | None = None, sms_client: SmsClient | None = 
     app = FastAPI(title="Lugha Verify", lifespan=lifespan)
     app.state.settings, app.state.session, app.state.tick = settings, Session, tick
     app.state.flush, app.state.retranslate, app.state.share = flush, retranslate, share
+    app.state.draft = draft
 
     @app.exception_handler(ServiceError)
     async def service_error(request: Request, exc: ServiceError):
@@ -209,7 +230,8 @@ def create_app(settings: Settings | None = None, sms_client: SmsClient | None = 
 
     @app.post("/api/campaigns/{cid}/start", dependencies=admin)
     def api_start_campaign(cid: int, bg: BackgroundTasks):
-        out = run(lambda db, eng: start_campaign(db, eng, settings, clock, cid))
+        out = run(lambda db, eng: start_campaign(db, eng, settings, clock, cid,
+                                                  translator.supports))
         bg.add_task(flush)
         return out
 
@@ -227,7 +249,8 @@ def create_app(settings: Settings | None = None, sms_client: SmsClient | None = 
 
     # ------------------------------------------------------------- portal
     app.include_router(make_router(SimpleNamespace(
-        run=run, flush=flush, settings=settings, clock=clock, session=Session)))
+        run=run, flush=flush, settings=settings, clock=clock, session=Session,
+        supports=translator.supports)))
     return app
 
 

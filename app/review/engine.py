@@ -115,6 +115,46 @@ class ReviewEngine:
             elif item.state == "fanout" and len(self._valid_replies(item)) < 2:
                 self._send_wave(item)
 
+    # ------------------------------------------------------- first drafts
+    @staticmethod
+    def draft_source(item: ReviewItem, supports) -> tuple[str, str] | None:
+        """(src lang, text) to machine-translate this item from, if the
+        translator supports it: customer Swahili first, else the original."""
+        st = item.candidate.source
+        options = []
+        if st.swahili_text and item.lang != "swh":
+            options.append(("swh", st.swahili_text))
+        options.append((st.campaign.source_lang, st.text))
+        return next(((l, t) for l, t in options if l != item.lang and supports(l, item.lang)),
+                    None)
+
+    def needs_draft(self, item: ReviewItem, supports) -> bool:
+        c = item.candidate
+        return (c.text is None and c.origin == "default_api"
+                and self.draft_source(item, supports) is not None)
+
+    def pending_drafts(self, supports) -> list[tuple[int, str, str, str]]:
+        """(item id, src lang, text, target lang) waiting for a first draft."""
+        out = []
+        for i in self.db.scalars(select(ReviewItem).where(ReviewItem.state == "drafting")):
+            src = self.draft_source(i, supports)
+            out.append((i.id, *(src or (None, None)), i.lang))
+        return out
+
+    def apply_draft(self, item_id: int, text: str | None, model_ref: str | None) -> None:
+        """Store the machine draft (None = no candidate: speakers translate
+        from scratch) and start the review."""
+        item = self.db.get(ReviewItem, item_id)
+        if item is None or item.state != "drafting":
+            return
+        if text:
+            item.candidate.text, item.candidate.model_ref = text, model_ref
+        item.state = "new"
+        if self.clock() >= self._deadline(item):
+            self._close_at_deadline(item)
+            return
+        self.start_item(item)
+
     def pending_retranslations(self) -> list[tuple[int, str, str]]:
         """(item id, reviewed Swahili, target lang) still to re-translate."""
         q = select(ReviewItem).where(ReviewItem.retranslate_from.is_not(None),
@@ -152,7 +192,8 @@ class ReviewEngine:
                        sent_at=now, expires_at=now + timedelta(minutes=minutes),
                        status="sent", shown_source_lang=shown,
                        shown_source_text=sources[shown],
-                       shown_candidate_text=item.candidate.text)
+                       shown_candidate_text=item.candidate.text,
+                       shown_candidate_id=item.candidate.id)
         self.db.add(t)
         self.db.flush()
         self._send(sp, T.task_sms(t.code, item.lang, item.candidate.text,

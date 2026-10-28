@@ -110,7 +110,10 @@ def items_of(db: Session, cid: int) -> list[ReviewItem]:
 
 
 def start_campaign(db: Session, eng: ReviewEngine, settings: Settings,
-                   clock: Callable[[], datetime], cid: int) -> dict:
+                   clock: Callable[[], datetime], cid: int,
+                   supports: Callable[[str, str], bool] = lambda s, t: False) -> dict:
+    """Items with no draft that the translator can make one for wait in
+    'drafting' (background job, up to ~3 min); the rest start now."""
     c = db.get(Campaign, cid)
     if c is None:
         raise ServiceError(404, "no such campaign")
@@ -118,7 +121,13 @@ def start_campaign(db: Session, eng: ReviewEngine, settings: Settings,
         raise ServiceError(409, f"campaign is {c.status}")
     c.review_deadline = clock() + (c.review_deadline - c.created_at)  # window starts now
     c.status = "running"
-    eng.start_items(items_of(db, cid))
+    ready = []
+    for item in items_of(db, cid):
+        if eng.needs_draft(item, supports):
+            item.state = "drafting"
+        else:
+            ready.append(item)
+    eng.start_items(ready)
     finish_campaigns(db, settings, eng.outbox, clock)  # nothing to review
     return {"id": cid, "status": c.status}
 

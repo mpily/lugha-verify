@@ -7,7 +7,7 @@
 {% for lang, d in c.deliveries.items() %}<tr><td>{{ lang }}</td><td>{{ d.n }}</td><td>{{ d.fallback }}</td><td>{{ d.delivered }}</td></tr>{% endfor %}</table>{% endif %}
 <h2>Review</h2>
 <table><tr><th>Sentence</th><th>Lang</th><th>State</th><th>Result</th><th>Replies</th></tr>
-{% for i in c["items"] %}<tr><td>{{ i.source_text }}</td><td>{{ i.lang }}</td><td>{{ {"new":"waiting","trusted":"with trusted reviewer","fanout":"with reviewers","closed":"done"}.get(i.state, i.state) }}</td>
+{% for i in c["items"] %}<tr><td>{{ i.source_text }}</td><td>{{ i.lang }}</td><td>{{ {"drafting":"getting machine draft","new":"waiting","trusted":"with trusted reviewer","fanout":"with reviewers","closed":"done"}.get(i.state, i.state) }}</td>
 <td>{% if i.final_status %}<span class="b {{ i.final_status }}">{{ i.final_status }}</span><br>{{ i.final_text or "" }}{% elif i.candidate %}<span class="muted">draft: {{ i.candidate }}</span>{% else %}<span class="muted">no draft</span>{% endif %}</td>
 <td>{% for s, n in i.tasks.items() %}{{ s }} {{ n }}{% if not loop.last %}, {% endif %}{% endfor %}</td></tr>
 {% else %}<tr><td colspan="5" class="muted">Nothing needs review.</td></tr>{% endfor %}</table>

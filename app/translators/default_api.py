@@ -23,8 +23,11 @@ class DefaultApiTranslator:
         self.url, self.max_wait, self.sleep = url, max_wait, sleep
         self.http = http or httpx.Client(timeout=timeout)
 
+    def supports(self, src: str, tgt: str) -> bool:
+        return (src, tgt) in SUPPORTED
+
     def translate(self, text: str, src: str, tgt: str) -> MTResult:
-        if (src, tgt) not in SUPPORTED:
+        if (src, tgt) not in SUPPORTED or not 1 <= len(text) <= 1000:
             return MTResult(None, None)
         waited, delay = 0.0, 5.0
         while True:

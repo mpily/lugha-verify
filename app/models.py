@@ -82,7 +82,8 @@ class ReviewItem(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     candidate_id: Mapped[int] = mapped_column(ForeignKey("candidates.id"), index=True)
     lang: Mapped[str] = mapped_column(String(8))
-    # state: new -> trusted -> fanout -> closed
+    # state: [drafting ->] new -> trusted -> fanout -> closed
+    # drafting = waiting for the machine translator before any task goes out
     state: Mapped[str] = mapped_column(String(16), default="new")
     started_at: Mapped[datetime | None] = mapped_column(DateTime)
     closed_at: Mapped[datetime | None] = mapped_column(DateTime)
@@ -115,6 +116,8 @@ class ReviewTask(Base):
     shown_source_text: Mapped[str | None] = mapped_column(Text)
     # The candidate this speaker rated (it can change after re-translation).
     shown_candidate_text: Mapped[str | None] = mapped_column(Text)
+    shown_candidate_id: Mapped[int | None] = mapped_column(ForeignKey("candidates.id"))
+    shown_candidate: Mapped["Candidate | None"] = relationship(foreign_keys=[shown_candidate_id])
     shared_at: Mapped[datetime | None] = mapped_column(DateTime)  # sent to shared dataset
     item: Mapped[ReviewItem] = relationship(back_populates="tasks")
     speaker: Mapped[Speaker] = relationship()

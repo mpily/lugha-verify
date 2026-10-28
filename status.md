@@ -120,3 +120,16 @@
   customer's text). The customer opts in by setting SHARED_DATA_URL; confirm
   that is enough or add an explicit per-campaign customer switch.
 - 113 tests pass; simulate.py PASS. No login rate limiting yet.
+- Build step 5a, first machine drafts: on start, an item with no uploaded
+  candidate waits in `drafting` while a background job asks the translator
+  (Space: swh→dav only; customer Swahili is used as the input when given).
+  The job runs outside the lock; the Space client retries up to 3 min, then
+  no candidate → speakers translate from scratch. Drafting past the deadline
+  closes as `no_reply`. Each task now records which candidate it showed
+  (`shown_candidate_id`) for per-model reports.
+- English-only messages: the Space has no EN→SW, so the Swahili item starts
+  with no candidate (Swahili reviewers translate from scratch) and the
+  Kidaw'ida draft is made from their Swahili by the re-translation job.
+  Open question for the user: add EN→SW machine translation (Space endpoint
+  in the research repo, or another free service) so the Swahili starts from a
+  draft?
