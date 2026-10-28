@@ -72,3 +72,17 @@ def not_opted_in_sms() -> str:
 
 def closed_sms(code: str) -> str:
     return f"Task {code} is closed, thank you. No reply needed."
+
+
+def expired_sms(code: str) -> str:
+    return f"Task {code} has expired, thank you. No reply needed."
+
+
+def expired_reply_sms(code: str) -> str:
+    return (f"Thanks! Task {code} had expired (30 min), so this reply is saved "
+            f"but not paid.")
+
+
+def no_correction_sms(code: str) -> str:
+    return (f"Task {code}: rating saved. Tasks are paid for 4-5 stars, or for "
+            f"your corrected version: {code} <stars> <your version>.")

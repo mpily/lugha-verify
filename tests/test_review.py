@@ -139,9 +139,7 @@ def test_wave_exhaustion(w):
     assert {t.wave for t in it.tasks} == {1, 2} and len(it.tasks) == 6
     w.clock.advance(minutes=30); w.engine.tick()
     assert len(it.tasks) == 6  # pool exhausted, nobody re-tasked
-    w.reply(ss[5], f"{w.code_for(it, ss[5])} 5")
-    w.reply(ss[0], f"{w.code_for(it, ss[0])} 5")  # wave-1 task, expired, item open
-    assert it.outcome == "verified"
+    assert "expired" in w.outbox.to(ss[0].id)[-1]
 
 
 def test_next_wave_only_when_needed(w):
@@ -269,3 +267,57 @@ def test_budget_never_exceeded(w):
     for s in [tr] + ss[:5]:
         w.reply(s, f"{w.code_for(it, s)} 5")
     assert sum(p.amount_kes for p in w.db.scalars(select(Payout))) <= 100
+
+
+def test_expired_task_reply_not_paid_not_counted(w):
+    ss = [w.speaker() for _ in range(6)]
+    it = w.item(); w.engine.start_item(it)
+    w.clock.advance(minutes=31); w.engine.tick()
+    assert "expired" in w.outbox.to(ss[0].id)[-1]
+    w.reply(ss[0], f"{w.code_for(it, ss[0])} 5")
+    t0 = next(t for t in it.tasks if t.speaker_id == ss[0].id)
+    assert t0.status == "late" and t0.stars == 5  # stored
+    assert "not paid" in w.outbox.to(ss[0].id)[-1]
+    w.reply(ss[5], f"{w.code_for(it, ss[5])} 5")
+    assert it.state == "fanout" and payouts(w) == set()
+
+
+def test_expired_before_tick_still_unpaid(w):
+    ss = [w.speaker() for _ in range(2)]
+    it = w.item(); w.engine.start_item(it)
+    w.clock.advance(minutes=45)  # scheduler has not ticked
+    w.reply(ss[0], f"{w.code_for(it, ss[0])} 5")
+    assert next(t for t in it.tasks if t.speaker_id == ss[0].id).status == "late"
+
+
+def test_low_stars_without_correction_unpaid_then_correction_paid(w):
+    ss = [w.speaker() for _ in range(3)]
+    it = w.item(); w.engine.start_item(it)
+    w.clock.advance(minutes=2)
+    c0 = w.code_for(it, ss[0])
+    w.reply(ss[0], f"{c0} 2")
+    t0 = next(t for t in it.tasks if t.speaker_id == ss[0].id)
+    assert t0.status == "no_correction" and t0.stars == 2
+    w.reply(ss[1], f"{w.code_for(it, ss[1])} 2 Choka iyacha")
+    assert it.state == "fanout"  # the bare rating did not count
+    w.reply(ss[0], f"{c0} 2 Choka iyacha")
+    assert it.outcome == "verified"
+    assert payouts(w) == {(ss[0].id, 50), (ss[1].id, 50)}
+
+
+def test_trusted_low_stars_without_correction_goes_to_fanout(w):
+    tr = w.speaker(trusted=["dav"]); ss = [w.speaker() for _ in range(3)]
+    it = w.item(); w.engine.start_item(it)
+    w.clock.advance(minutes=2)
+    w.reply(tr, f"{w.code_for(it, tr)} 1")
+    assert it.state == "fanout" and payouts(w) == set()
+    assert len([t for t in it.tasks if t.wave == 1]) == 3
+
+
+def test_no_correction_task_notified_on_close(w):
+    ss = [w.speaker() for _ in range(3)]
+    it = w.item(); w.engine.start_item(it)
+    w.clock.advance(minutes=2)
+    w.reply(ss[0], f"{w.code_for(it, ss[0])} 1")
+    w.reply(ss[1], f"{w.code_for(it, ss[1])} 5"); w.reply(ss[2], f"{w.code_for(it, ss[2])} 5")
+    assert "is filled" in w.outbox.to(ss[0].id)[-1]

@@ -23,3 +23,11 @@
   trusted-review rejections, airtime sending (payouts recorded `pending`).
 - Note for step 5: the Space API accepts `src=swh` only, so English sources
   need EN→SW first (customer Swahili text, or another translator).
+- User decisions (2026-10-28, replaces the first two choices above):
+  - Reply to an expired fan-out task (30 min): stored as `late`, not paid,
+    not counted. Speakers get a "task expired, no reply needed" SMS.
+  - Stars < 4 with no correction: stored as `no_correction`, not paid, not
+    counted; a later correction on the same code is accepted and paid. From
+    the trusted speaker it sends the item to fan-out at once.
+  - Unknown/someone else's code same answer; unknown numbers logged only: kept.
+  - Trusted speaker's late reply still counts as a stage-2 response (spec §5).
