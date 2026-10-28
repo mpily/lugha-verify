@@ -54,7 +54,7 @@
 - AT callbacks are checked with a shared `?token=` (`AT_CALLBACK_TOKEN`), since
   AT doesn't sign callbacks. New env var.
 - `scripts/simulate.py` (offline): the A/B/C/D/E pivot scenario end to end
-  through the HTTP callbacks — PASS (20/20 SMS, 28 segments). 82 tests pass.
+  through the HTTP callbacks — PASS (20/20 SMS, 28 segments). 81 tests pass.
 - NOT yet run: `simulate.py --live` against the AT sandbox.
   developers.africastalking.com and the AT API are blocked by this build
   session's network policy, so the client follows AT's documented
