@@ -12,9 +12,16 @@ from ..models import ReviewTask, Speaker
 
 
 class SpeakerSource(Protocol):
-    def trusted(self, db: Session, lang: str) -> Speaker | None: ...
-    def eligible(self, db: Session, lang: str, exclude_ids: set[int],
+    def trusted(self, db: Session, lang: str, readable: set[str],
+                exclude_ids: set[int]) -> Speaker | None: ...
+    def eligible(self, db: Session, lang: str, readable: set[str], exclude_ids: set[int],
                  limit: int, min_accept_rate: float) -> list[Speaker]: ...
+
+
+def can_read(s: Speaker, lang: str, readable: set[str]) -> bool:
+    """Speaker knows the target language and reads an available source."""
+    langs = s.languages or []
+    return lang in langs and any(x in readable for x in langs if x != lang)
 
 
 def _active(s: Speaker) -> bool:
@@ -40,17 +47,20 @@ class LocalSpeakerSource:
             last.get(s.id, never),
             s.id))
 
-    def trusted(self, db: Session, lang: str) -> Speaker | None:
+    def trusted(self, db: Session, lang: str, readable: set[str],
+                exclude_ids: set[int]) -> Speaker | None:
         cands = [s for s in db.scalars(select(Speaker)).all()
-                 if _active(s) and lang in (s.trusted_for or [])]
+                 if _active(s) and lang in (s.trusted_for or [])
+                 and s.id not in exclude_ids
+                 and can_read(s, lang, readable)]
         cands = self._sorted(db, cands)
         return cands[0] if cands else None
 
-    def eligible(self, db: Session, lang: str, exclude_ids: set[int],
+    def eligible(self, db: Session, lang: str, readable: set[str], exclude_ids: set[int],
                  limit: int, min_accept_rate: float) -> list[Speaker]:
         out = []
         for s in db.scalars(select(Speaker)).all():
-            if not _active(s) or s.id in exclude_ids or lang not in (s.languages or []):
+            if not _active(s) or s.id in exclude_ids or not can_read(s, lang, readable):
                 continue
             if s.accept_rate is not None and s.accept_rate < min_accept_rate:
                 continue

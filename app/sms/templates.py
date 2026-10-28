@@ -2,17 +2,21 @@
 from __future__ import annotations
 
 LANG_NAMES = {"dav": "Kidaw'ida", "swh": "Kiswahili", "eng": "English"}
+SHORT = {"eng": "EN", "swh": "SW"}
 
 
 def lang_name(code: str) -> str:
     return LANG_NAMES.get(code, code)
 
 
-def task_sms(code: str, lang: str, candidate: str | None, source: str) -> str:
+def task_sms(code: str, lang: str, candidate: str | None, source: str,
+             source_lang: str = "eng") -> str:
+    src = f'{SHORT.get(source_lang, source_lang.upper())}: "{source}"'
     if candidate is None:
-        return (f'{code} Translate into {lang_name(lang)}:\n"{source}"\n'
+        return (f"{code} Translate into {lang_name(lang)}:\n{src}\n"
                 f"Reply: {code} <your translation>. Add SHARE to allow research use.")
-    return (f"{code} Rate 1-5 & correct ({lang_name(lang)}):\n\"{candidate}\"\n"
+    return (f"{code} Rate 1-5 & correct ({lang_name(lang)}):\n{src}\n"
+            f"Machine: \"{candidate}\"\n"
             f"Reply: {code} 5  or  {code} 3 <your version>. "
             f"Add SHARE to allow research use.")
 

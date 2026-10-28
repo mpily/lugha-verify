@@ -59,7 +59,7 @@ class World:
                                    rng=random.Random(0))
         self._n = 0
 
-    def speaker(self, langs=("dav",), trusted=(), source="customer", opted_in=True,
+    def speaker(self, langs=("eng", "dav"), trusted=(), source="customer", opted_in=True,
                 accept=0, reject=0) -> Speaker:
         self._n += 1
         phone = f"+2547000000{self._n:02d}"
@@ -82,6 +82,19 @@ class World:
         self.db.add_all([c, st, cand, it])
         self.db.flush()
         return it
+
+    def source(self, text, candidates, swahili_text=None, source_lang="eng",
+               deadline_min=120):
+        from app.review.setup import CandidateIn, create_review_items
+        c = Campaign(mode="bulk", source_lang=source_lang, fallback_lang="swh",
+                     created_at=self.clock.now, status="running",
+                     review_deadline=self.clock.now + timedelta(minutes=deadline_min))
+        st = SourceText(campaign=c, text=text, swahili_text=swahili_text)
+        self.db.add_all([c, st])
+        items = create_review_items(self.db, self.settings, st,
+                                    {k: CandidateIn(v, "default_api", "nllb")
+                                     for k, v in candidates.items()})
+        return {i.lang: i for i in items}
 
     def code_for(self, item, sp):
         return next(t.code for t in item.tasks if t.speaker_id == sp.id)

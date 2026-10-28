@@ -28,7 +28,9 @@ def choose_delivery_text(*, recipient_lang: str, source_text: str, source_lang: 
                          needs_review: bool, translation_text: str | None,
                          translation_status: str | None) -> DeliveryChoice:
     """translation_* describe the best translation in recipient_lang (or None).
-    needs_review = settings.needs_review(recipient_lang)."""
+    needs_review = settings.needs_review_for(recipient_lang, customer_swahili).
+    swahili_text must be customer-written or `verified` Swahili, never
+    unreviewed machine Swahili (it is also used as the fallback)."""
     fb = fallback(source_text, source_lang, fallback_lang, swahili_text)
     try:
         if recipient_lang == source_lang:

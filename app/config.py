@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     # "*" = every language except eng and swh; otherwise a comma list.
     review_required_langs: str = "*"
 
+    # Machine-generated Swahili (no customer Swahili) is reviewed like any
+    # review-required language and only delivered once verified.
+    review_machine_swahili: bool = True
+
     payout_per_item_kes: int = 100
     trusted_timeout_min: int = 15
     speaker_timeout_min: int = 30
@@ -67,6 +71,14 @@ class Settings(BaseSettings):
             if getattr(self, name) <= 0:
                 raise ValueError(f"{name.upper()} must be > 0")
         return self
+
+    def needs_review_for(self, lang: str, customer_swahili: bool) -> bool:
+        """Delivery-time check: Swahili written by the customer needs no
+        review; machine Swahili does when REVIEW_MACHINE_SWAHILI is on."""
+        if lang.strip().lower() == "swh" and not customer_swahili \
+                and self.review_machine_swahili:
+            return True
+        return self.needs_review(lang)
 
     def needs_review(self, lang: str) -> bool:
         lang = lang.strip().lower()

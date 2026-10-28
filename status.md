@@ -31,3 +31,15 @@
     the trusted speaker it sends the item to fan-out at once.
   - Unknown/someone else's code same answer; unknown numbers logged only: kept.
   - Trusted speaker's late reply still counts as a stage-2 response (spec §5).
+- Swahili pivot (user decision 2026-10-28): with no customer Swahili, the
+  NLLB Swahili gets its own review item (same rules; `REVIEW_MACHINE_SWAHILI`,
+  default on) and is delivered to Swahili recipients only once verified.
+  `speakers.languages` = languages a speaker is comfortable with, most
+  preferred first; a speaker gets a task only if they read an available source
+  and is shown it in their preferred language (`review_tasks.shown_source_*`).
+  Swahili becomes an available source at its first valid reply (accept or
+  correction); Kitaita speakers who only read Swahili get a wave right away.
+  One open task per speaker per sentence; target items start before the
+  Swahili item so multilingual speakers go to the target language first.
+  Open: if the Swahili reviewer corrects the Swahili, the Kitaita candidate was
+  still made from the uncorrected machine Swahili (re-translate? step 5).

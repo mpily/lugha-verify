@@ -68,26 +68,84 @@ class ReviewEngine:
     def _deadline(self, item: ReviewItem) -> datetime:
         return item.candidate.source.campaign.review_deadline
 
+    # -------------------------------------------------------------- sources
+    def _sources(self, item: ReviewItem) -> dict[str, str]:
+        """Source texts a reviewer of this item may be shown, by language:
+        the original, customer Swahili, or reviewed machine Swahili (pivot)."""
+        st = item.candidate.source
+        out = {st.campaign.source_lang: st.text}
+        if "swh" not in out:
+            sw = st.swahili_text or self._pivot_swahili(st.id)
+            if sw:
+                out["swh"] = sw
+        out.pop(item.lang, None)
+        return out
+
+    def _pivot_swahili(self, source_id: int) -> str | None:
+        """Machine Swahili is usable as a source once a reviewer accepted or
+        corrected it: the verified text if any, else the first valid reply."""
+        tr = self.db.scalar(select(Translation).where(
+            Translation.source_id == source_id, Translation.lang == "swh",
+            Translation.status == "verified"))
+        if tr is not None and tr.final_text:
+            return tr.final_text
+        q = (select(ReviewItem).join(Candidate)
+             .where(Candidate.source_id == source_id, ReviewItem.lang == "swh"))
+        for sw_item in self.db.scalars(q).all():
+            replies = self._valid_replies(sw_item)
+            if replies:
+                return self._effective(sw_item, replies[0])
+        return None
+
+    def _on_swahili_available(self, sw_item: ReviewItem) -> None:
+        """Speakers who read Swahili but not the original become eligible:
+        send them a wave now on every open sibling item that still needs it."""
+        src_id = sw_item.candidate.source_id
+        q = (select(ReviewItem).join(Candidate)
+             .where(Candidate.source_id == src_id, ReviewItem.lang != "swh",
+                    ReviewItem.state == "fanout"))
+        for item in self.db.scalars(q).all():
+            if len(self._valid_replies(item)) < 2:
+                self._send_wave(item)
+
     def _create_task(self, item: ReviewItem, sp: Speaker, wave: int,
-                     minutes: int) -> ReviewTask:
+                     minutes: int, sources: dict[str, str]) -> ReviewTask:
         now = self.clock()
+        shown = next(x for x in sp.languages if x in sources)
         t = ReviewTask(item=item, speaker_id=sp.id, speaker=sp,
                        code=new_code(self._open_codes(), self.rng), wave=wave,
                        sent_at=now, expires_at=now + timedelta(minutes=minutes),
-                       status="sent")
+                       status="sent", shown_source_lang=shown,
+                       shown_source_text=sources[shown])
         self.db.add(t)
         self.db.flush()
-        c = item.candidate
-        self._send(sp, T.task_sms(t.code, item.lang, c.text, c.source.text))
+        self._send(sp, T.task_sms(t.code, item.lang, item.candidate.text,
+                                  sources[shown], shown))
         return t
 
+    def _busy(self, item: ReviewItem) -> set[int]:
+        """Speakers already on this item, or with an open task on the same
+        source text in another language (one open task per sentence)."""
+        q = (select(ReviewTask.speaker_id).join(ReviewItem).join(Candidate)
+             .where(Candidate.source_id == item.candidate.source_id,
+                    ReviewItem.id != item.id,
+                    ReviewTask.status.in_(("sent", "no_correction"))))
+        return {t.speaker_id for t in item.tasks} | set(self.db.scalars(q).all())
+
+    def start_items(self, items: list[ReviewItem]) -> None:
+        """Start target-language items before machine-Swahili items, so the
+        scarce multilingual speakers go to the target languages first."""
+        for item in sorted(items, key=lambda i: (i.lang == "swh", i.id)):
+            self.start_item(item)
+
     def _send_wave(self, item: ReviewItem) -> int:
-        tasked = {t.speaker_id for t in item.tasks}
+        tasked = self._busy(item)
         wave = max((t.wave for t in item.tasks), default=0) + 1
-        sps = self.speakers.eligible(self.db, item.lang, tasked,
+        sources = self._sources(item)
+        sps = self.speakers.eligible(self.db, item.lang, set(sources), tasked,
                                      self.s.fanout_wave_size, self.s.min_accept_rate)
         for sp in sps:
-            self._create_task(item, sp, wave, self.s.speaker_timeout_min)
+            self._create_task(item, sp, wave, self.s.speaker_timeout_min, sources)
         return len(sps)
 
     def _effective(self, item: ReviewItem, t: ReviewTask) -> str | None:
@@ -112,10 +170,11 @@ class ReviewEngine:
             self._close(item, "verified", mem.final_text, [], notify=False,
                         n_reviews=mem.n_reviews)
             return
-        trusted = self.speakers.trusted(self.db, item.lang)
+        sources = self._sources(item)
+        trusted = self.speakers.trusted(self.db, item.lang, set(sources), self._busy(item))
         if trusted is not None:
             item.state = "trusted"
-            self._create_task(item, trusted, 0, self.s.trusted_timeout_min)
+            self._create_task(item, trusted, 0, self.s.trusted_timeout_min, sources)
         else:
             item.state = "fanout"
             self._send_wave(item)
@@ -293,6 +352,13 @@ class ReviewEngine:
                 self._send_wave(item)
             return
         t.status = "replied"
+        first_swahili = (item.lang == "swh" and len(self._valid_replies(item)) == 1
+                         and not item.candidate.source.swahili_text)
+        self._settle(item, sp, t)
+        if first_swahili:
+            self._on_swahili_available(item)
+
+    def _settle(self, item: ReviewItem, sp: Speaker, t: ReviewTask) -> None:
         if item.state == "trusted" and t.wave == 0:
             self._close(item, "verified", self._effective(item, t),
                         [(t, item.budget_kes)], notify=True)

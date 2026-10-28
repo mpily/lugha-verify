@@ -15,6 +15,9 @@ class Speaker(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     phone_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     phone_enc: Mapped[str] = mapped_column(Text)
+    # Languages the speaker is comfortable with, most preferred first. A
+    # speaker reviews into any of them and is shown the source in the first
+    # one available (e.g. ["eng","swh","dav"]).
     languages: Mapped[list] = mapped_column(JSON, default=list)
     source: Mapped[str] = mapped_column(String(16), default="customer")  # customer|network
     trusted_for: Mapped[list] = mapped_column(JSON, default=list)
@@ -101,6 +104,8 @@ class ReviewTask(Base):
     # sent|replied|accepted|late|expired|invalid
     status: Mapped[str] = mapped_column(String(16), default="sent")
     is_gold: Mapped[bool] = mapped_column(Boolean, default=False)
+    shown_source_lang: Mapped[str | None] = mapped_column(String(8))
+    shown_source_text: Mapped[str | None] = mapped_column(Text)
     item: Mapped[ReviewItem] = relationship(back_populates="tasks")
     speaker: Mapped[Speaker] = relationship()
 
