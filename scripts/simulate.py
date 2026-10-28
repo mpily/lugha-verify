@@ -33,6 +33,7 @@ from app.config import Settings  # noqa: E402
 from app.main import create_app  # noqa: E402
 from app.models import OutboundSms, Payout, ReviewTask, Translation  # noqa: E402
 from app.sms.at_client import FakeSmsClient  # noqa: E402
+from app.translators.base import FakeTranslator  # noqa: E402
 
 PHONES = {"B": "+254711000001", "C": "+254711000002",
           "D": "+254711000003", "E": "+254711000004"}
@@ -41,7 +42,8 @@ LANGS = {"B": ["swh", "dav"], "C": ["swh", "dav"],
 EN = "Wash your hands with soap before eating food"
 SW = "Nawa mikono kwa sabuni kabla ya kula chakula"
 SW_FIXED = "Osha mikono kwa sabuni kabla ya kula chakula"
-DAV = "Choka yacha"  # placeholder candidate, not real Kidaw'ida for EN
+DAV = "Choka yacha"  # placeholder candidates, not real Kidaw'ida for EN
+DAV2 = "Choka iyacha"  # what the (fake) translator makes from E's Swahili
 
 
 class SimClock:
@@ -73,7 +75,10 @@ def main(argv=None) -> int:
                             phone_hash_salt="sim", admin_token="sim",
                             database_url="sqlite://")
         client = FakeSmsClient()
-    app = create_app(settings, sms_client=client, clock=clock, start_scheduler=False)
+    # The translator is always simulated: the Space is a separate service.
+    translator = FakeTranslator({(SW_FIXED, "dav"): DAV2})
+    app = create_app(settings, sms_client=client, clock=clock, start_scheduler=False,
+                     translator=translator)
     admin = {"Authorization": "Bearer " + settings.admin_token.get_secret_value()}
     tok = settings.at_callback_token
     q = f"?token={tok.get_secret_value()}" if tok else ""
@@ -133,17 +138,21 @@ def main(argv=None) -> int:
         check(task_of("B", "dav") is None and task_of("C", "dav") is None,
               "B, C not tasked yet (no Swahili source)")
 
-        print("3. E corrects the Swahili -> B and C get it")
+        print("3. E corrects the Swahili -> Kidaw'ida re-translated -> B and C get it")
         clock.advance(minutes=3)
         sms("E", f"{code('E')} 3 {SW_FIXED} SHARE")
+        check(task_of("B", "dav") is None, "B waits for the re-translation")
+        check(app.state.retranslate() == 1 and translator.calls == [(SW_FIXED, "swh", "dav")],
+              "re-translated from E's Swahili")
         for who in ("B", "C"):
             t = task_of(who, "dav")
-            check(t is not None and t.shown_source_text == SW_FIXED,
-                  f"{who} got the Kidaw'ida task showing E's Swahili")
+            check(t is not None and t.shown_source_text == SW_FIXED
+                  and t.shown_candidate_text == DAV2,
+                  f"{who} got the new Kidaw'ida draft with E's Swahili")
 
-        print("4. D and B accept the Kidaw'ida -> verified, paid 50 each")
+        print("4. D corrects to the new draft, B accepts it -> verified, paid 50 each")
         clock.advance(minutes=4)
-        sms("D", f"{code('D')} 4")
+        sms("D", f"{code('D')} 3 {DAV2}")
         sms("B", f"{code('B')} 5")
         check("is filled" in last_sms("C"), "C told the task is filled")
         c_code = task_of("C", "dav").code

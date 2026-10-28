@@ -59,3 +59,15 @@
   developers.africastalking.com and the AT API are blocked by this build
   session's network policy, so the client follows AT's documented
   `version1/messaging` form API from memory; first live run must confirm it.
+- Re-translation (user decision 2026-10-28): when the Swahili reviewer
+  changes the machine Swahili, every open target item whose candidate came
+  from the Space (`origin=default_api`) is re-translated from the reviewed
+  Swahili (`review_items.retranslate_from`, background job every 10 s,
+  outside the lock). Swahili-only readers are tasked once the new draft is in.
+  If the translator returns nothing, the old candidate is kept (not invented,
+  not dropped). Each task stores the candidate it showed
+  (`shown_candidate_text`), so ratings are compared against what each speaker
+  actually saw. `DefaultApiTranslator` (Space, swh→dav only) retries with
+  backoff for up to 3 min, then gives no candidate; it shows reviewers
+  `kitaita_marked` so untranslated words appear as `[?word]`.
+- Trusted speaker's late reply counting as a paid stage-2 reply: confirmed.

@@ -30,17 +30,63 @@ def test_first_wave_goes_to_D_and_E(w):
     assert w.outbox.to(sp["B"].id) == [] and w.outbox.to(sp["C"].id) == []
 
 
-def test_after_E_corrects_B_and_C_get_Es_swahili(w):
+FIXED = "Osha mikono kwa sabuni kabla ya kula chakula"
+
+
+def retranslate(w, output):
+    for item_id, sw, lang in w.engine.pending_retranslations():
+        w.engine.apply_retranslation(item_id, sw, output, "fake")
+
+
+def test_after_E_corrects_dav_is_retranslated_then_B_and_C_get_it(w):
     sp, items = setup(w)
     w.clock.advance(minutes=3)
-    fixed = "Osha mikono kwa sabuni kabla ya kula chakula"
-    w.reply(sp["E"], f"{w.code_for(items['swh'], sp['E'])} 3 {fixed}")
+    w.reply(sp["E"], f"{w.code_for(items['swh'], sp['E'])} 3 {FIXED}")
     dav = items["dav"]
+    assert task(dav, sp["B"]) is None  # waits for the re-translation
+    assert w.engine.pending_retranslations() == [(dav.id, FIXED, "dav")]
+    w.clock.advance(minutes=31); w.engine.tick()
+    assert task(dav, sp["B"]) is None  # no wave while re-translation pending
+    retranslate(w, "Choka iyacha")
+    assert dav.candidate.text == "Choka iyacha" and dav.retranslate_from is None
     for k in ("B", "C"):
         t = task(dav, sp[k])
         assert t is not None and t.shown_source_lang == "swh"
-        assert t.shown_source_text == fixed
-        assert f'SW: "{fixed}"' in w.outbox.to(sp[k].id)[-1]
+        assert t.shown_source_text == FIXED and t.shown_candidate_text == "Choka iyacha"
+        assert f'SW: "{FIXED}"' in w.outbox.to(sp[k].id)[-1]
+        assert 'Machine: "Choka iyacha"' in w.outbox.to(sp[k].id)[-1]
+    assert task(dav, sp["D"]).shown_candidate_text == DAV  # D's task unchanged
+
+
+def test_ratings_compare_the_candidate_each_speaker_saw(w):
+    sp, items = setup(w)
+    w.clock.advance(minutes=3)
+    w.reply(sp["E"], f"{w.code_for(items['swh'], sp['E'])} 3 {FIXED}")
+    retranslate(w, "Choka iyacha")
+    w.clock.advance(minutes=2)
+    w.reply(sp["D"], f"{w.code_for(items['dav'], sp['D'])} 5")   # accepts old
+    w.reply(sp["B"], f"{w.code_for(items['dav'], sp['B'])} 5")   # accepts new
+    assert items["dav"].outcome == "unverified"
+
+
+def test_translator_gives_nothing_keeps_old_candidate(w):
+    sp, items = setup(w)
+    w.clock.advance(minutes=3)
+    w.reply(sp["E"], f"{w.code_for(items['swh'], sp['E'])} 3 {FIXED}")
+    retranslate(w, None)
+    assert items["dav"].candidate.text == DAV
+    assert task(items["dav"], sp["B"]) is not None
+
+
+def test_uploaded_candidates_not_retranslated(w):
+    sp = dict(B=w.speaker(langs=["swh", "dav"]), E=w.speaker(langs=["eng", "swh"]))
+    items = w.source(EN, {"swh": SW, "dav": DAV})
+    items["dav"].candidate.origin = "uploaded"
+    w.engine.start_items(list(items.values()))
+    w.clock.advance(minutes=3)
+    w.reply(sp["E"], f"{w.code_for(items['swh'], sp['E'])} 3 {FIXED}")
+    assert w.engine.pending_retranslations() == []
+    assert task(items["dav"], sp["B"]) is not None
 
 
 def test_E_accepts_machine_swahili_is_shown(w):
@@ -61,6 +107,7 @@ def test_end_to_end_D_and_B_agree(w):
     sp, items = setup(w)
     w.clock.advance(minutes=3)
     w.reply(sp["E"], f"{w.code_for(items['swh'], sp['E'])} 5")
+    assert w.engine.pending_retranslations() == []  # unchanged Swahili
     w.clock.advance(minutes=2)
     w.reply(sp["D"], f"{w.code_for(items['dav'], sp['D'])} 4")
     w.reply(sp["B"], f"{w.code_for(items['dav'], sp['B'])} 5")

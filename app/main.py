@@ -22,6 +22,8 @@ from .review.setup import CandidateIn, create_review_items
 from .sms import templates as T
 from .sms.at_client import ATClient, SmsClient
 from .sms.outbox import DbOutbox, flush_outbox
+from .translators.base import Translator
+from .translators.default_api import DefaultApiTranslator
 
 log = logging.getLogger(__name__)
 TICK_SECONDS = 30
@@ -70,13 +72,15 @@ class CampaignIn(BaseModel):
 
 def create_app(settings: Settings | None = None, sms_client: SmsClient | None = None,
                clock: Callable[[], datetime] = utcnow,
-               start_scheduler: bool = True) -> FastAPI:
+               start_scheduler: bool = True,
+               translator: Translator | None = None) -> FastAPI:
     settings = settings or Settings()  # fails fast on bad/missing env vars
     engine, Session = make_session_factory(settings.database_url)
     Base.metadata.create_all(engine)  # TODO(step): Alembic migrations
     sms_client = sms_client or ATClient(settings.at_username,
                                         settings.at_api_key.get_secret_value(),
                                         settings.at_sender, settings.at_sandbox)
+    translator = translator or DefaultApiTranslator(settings.translate_api_url)
     key = settings.phone_enc_key.get_secret_value()
     salt = settings.phone_hash_salt.get_secret_value()
     lock = threading.RLock()  # one writer at a time (inbound vs scheduler)
@@ -97,25 +101,43 @@ def create_app(settings: Settings | None = None, sms_client: SmsClient | None = 
         run(lambda db, eng: eng.tick())
         flush()
 
+    def retranslate():
+        """Re-make candidates from reviewed Swahili. The translator call can
+        take minutes (Space asleep), so it runs outside the lock."""
+        jobs = run(lambda db, eng: eng.pending_retranslations())
+        for item_id, swahili, lang in jobs:
+            try:
+                res = translator.translate(swahili, "swh", lang)
+                text, ref = res.text, res.model_ref
+            except Exception:  # noqa: BLE001
+                log.exception("re-translation failed")
+                text, ref = None, None
+            run(lambda db, eng: eng.apply_retranslation(item_id, swahili, text, ref))
+        if jobs:
+            flush()
+        return len(jobs)
+
     @contextlib.asynccontextmanager
     async def lifespan(app: FastAPI):
-        task = None
+        tasks = []
         if start_scheduler:
-            async def loop():
-                while True:
-                    try:
-                        await asyncio.to_thread(tick)
-                    except Exception:  # noqa: BLE001
-                        log.exception("scheduler tick failed")
-                    await asyncio.sleep(TICK_SECONDS)
-            task = asyncio.create_task(loop())
+            def every(fn, seconds):
+                async def loop():
+                    while True:
+                        try:
+                            await asyncio.to_thread(fn)
+                        except Exception:  # noqa: BLE001
+                            log.exception("%s failed", fn.__name__)
+                        await asyncio.sleep(seconds)
+                return asyncio.create_task(loop())
+            tasks = [every(tick, TICK_SECONDS), every(retranslate, 10)]
         yield
-        if task:
-            task.cancel()
+        for t in tasks:
+            t.cancel()
 
     app = FastAPI(title="Lugha Verify", lifespan=lifespan)
     app.state.settings, app.state.session, app.state.tick = settings, Session, tick
-    app.state.flush = flush
+    app.state.flush, app.state.retranslate = flush, retranslate
 
     def check_callback(token: str | None = Query(None)):
         want = settings.at_callback_token

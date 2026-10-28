@@ -98,15 +98,50 @@ class ReviewEngine:
         return None
 
     def _on_swahili_available(self, sw_item: ReviewItem) -> None:
-        """Speakers who read Swahili but not the original become eligible:
-        send them a wave now on every open sibling item that still needs it."""
+        """Speakers who read Swahili but not the original become eligible.
+        If the reviewer changed the Swahili, machine candidates made from the
+        old Swahili are re-translated first (the wave goes out once that is
+        done, see apply_retranslation); otherwise the wave goes out now."""
+        reviewed = self._effective(sw_item, self._valid_replies(sw_item)[0])
+        changed = normalize_for_compare(reviewed) != normalize_for_compare(
+            sw_item.candidate.text or "")
         src_id = sw_item.candidate.source_id
         q = (select(ReviewItem).join(Candidate)
              .where(Candidate.source_id == src_id, ReviewItem.lang != "swh",
-                    ReviewItem.state == "fanout"))
+                    ReviewItem.state.in_(OPEN_STATES)))
         for item in self.db.scalars(q).all():
-            if len(self._valid_replies(item)) < 2:
+            if changed and item.candidate.origin == "default_api":
+                item.retranslate_from = reviewed
+            elif item.state == "fanout" and len(self._valid_replies(item)) < 2:
                 self._send_wave(item)
+
+    def pending_retranslations(self) -> list[tuple[int, str, str]]:
+        """(item id, reviewed Swahili, target lang) still to re-translate."""
+        q = select(ReviewItem).where(ReviewItem.retranslate_from.is_not(None),
+                                     ReviewItem.state.in_(OPEN_STATES))
+        return [(i.id, i.retranslate_from, i.lang) for i in self.db.scalars(q).all()]
+
+    def apply_retranslation(self, item_id: int, swahili: str, text: str | None,
+                            model_ref: str | None) -> None:
+        """Swap in the candidate re-made from reviewed Swahili, then task the
+        Swahili readers. If the translator gave nothing, keep the old
+        candidate rather than invent one. Earlier tasks keep the candidate they
+        showed (shown_candidate_text), so their ratings stay correct."""
+        item = self.db.get(ReviewItem, item_id)
+        if item is None or item.retranslate_from != swahili:
+            return  # changed meanwhile; a newer job will handle it
+        item.retranslate_from = None
+        if item.state not in OPEN_STATES:
+            return
+        if text and normalize_for_compare(text) != normalize_for_compare(
+                item.candidate.text or ""):
+            old = item.candidate
+            item.candidate = Candidate(source=old.source, lang=old.lang, text=text,
+                                       origin="default_api", model_ref=model_ref)
+            self.db.add(item.candidate)
+            self.db.flush()
+        if item.state == "fanout" and len(self._valid_replies(item)) < 2:
+            self._send_wave(item)
 
     def _create_task(self, item: ReviewItem, sp: Speaker, wave: int,
                      minutes: int, sources: dict[str, str]) -> ReviewTask:
@@ -116,7 +151,8 @@ class ReviewEngine:
                        code=new_code(self._open_codes(), self.rng), wave=wave,
                        sent_at=now, expires_at=now + timedelta(minutes=minutes),
                        status="sent", shown_source_lang=shown,
-                       shown_source_text=sources[shown])
+                       shown_source_text=sources[shown],
+                       shown_candidate_text=item.candidate.text)
         self.db.add(t)
         self.db.flush()
         self._send(sp, T.task_sms(t.code, item.lang, item.candidate.text,
@@ -151,8 +187,8 @@ class ReviewEngine:
     def _effective(self, item: ReviewItem, t: ReviewTask) -> str | None:
         if t.corrected_text:
             return t.corrected_text
-        if item.candidate.text is not None and t.stars is not None and t.stars >= 4:
-            return item.candidate.text
+        if t.shown_candidate_text is not None and t.stars is not None and t.stars >= 4:
+            return t.shown_candidate_text
         return None
 
     def _valid_replies(self, item: ReviewItem) -> list[ReviewTask]:
@@ -217,7 +253,7 @@ class ReviewEngine:
         current = [t for t in item.tasks if t.wave == wave]
         done = all(t.status != "sent" or t.speaker.opted_out_at is not None
                    for t in current)
-        if done and len(self._valid_replies(item)) < 2:
+        if done and len(self._valid_replies(item)) < 2 and item.retranslate_from is None:
             self._send_wave(item)  # may send 0 when the pool is exhausted
 
     def _close_at_deadline(self, item: ReviewItem) -> None:
@@ -329,7 +365,7 @@ class ReviewEngine:
             return  # duplicate reply / duplicate callback: first one stands
         if t.status == "expired" and t.speaker.opted_out_at is not None:
             return
-        if item.candidate.text is None and not r.text:
+        if t.shown_candidate_text is None and not r.text:
             self._send(sp, T.parse_error_sms())
             return
         t.replied_at, t.stars, t.corrected_text, t.share_consent = now, r.stars, r.text, r.share

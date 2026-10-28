@@ -84,6 +84,9 @@ class ReviewItem(Base):
     closed_at: Mapped[datetime | None] = mapped_column(DateTime)
     budget_kes: Mapped[int] = mapped_column(Integer)
     outcome: Mapped[str | None] = mapped_column(String(16))  # verified|unverified|no_reply
+    # Set when reviewed Swahili differs from the machine Swahili the candidate
+    # was made from: re-translate from this text before tasking more speakers.
+    retranslate_from: Mapped[str | None] = mapped_column(Text)
     candidate: Mapped[Candidate] = relationship()
     tasks: Mapped[list["ReviewTask"]] = relationship(back_populates="item")
 
@@ -106,6 +109,8 @@ class ReviewTask(Base):
     is_gold: Mapped[bool] = mapped_column(Boolean, default=False)
     shown_source_lang: Mapped[str | None] = mapped_column(String(8))
     shown_source_text: Mapped[str | None] = mapped_column(Text)
+    # The candidate this speaker rated (it can change after re-translation).
+    shown_candidate_text: Mapped[str | None] = mapped_column(Text)
     item: Mapped[ReviewItem] = relationship(back_populates="tasks")
     speaker: Mapped[Speaker] = relationship()
 
