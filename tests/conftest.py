@@ -34,6 +34,12 @@ def reset_db() -> None:
         c.execute(text("DROP SCHEMA public CASCADE"))
         c.execute(text("CREATE SCHEMA public"))
     eng.dispose()
+    from alembic import command
+    from alembic.config import Config
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    cfg = Config(os.path.join(root, "alembic.ini"))
+    cfg.attributes["url"] = TEST_DB
+    command.upgrade(cfg, "head")  # Postgres schema comes from the migrations
 KEY = Fernet.generate_key().decode()
 SALT = "test-salt"
 
@@ -74,7 +80,8 @@ class World:
     def __init__(self, **settings_kw):
         self.settings = make_settings(**settings_kw)
         engine, factory = make_session_factory(self.settings.database_url)
-        Base.metadata.create_all(engine)
+        if self.settings.database_url.startswith("sqlite"):
+            Base.metadata.create_all(engine)
         self.db = factory()
         self.clock = Clock()
         self.outbox = Outbox()

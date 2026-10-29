@@ -17,7 +17,7 @@ from sqlalchemy import select
 
 from .bulk import finish_campaigns, import_recipients, recipient_keyword
 from .config import Settings
-from .db import Base, make_session_factory
+from .db import ensure_schema, make_session_factory
 from .exports import (HttpSink, LocalJsonlSink, SharedDataSink, campaign_rows, export_shared,
                       to_csv, to_jsonl)
 from .models import Delivery, OutboundSms, Speaker
@@ -51,7 +51,7 @@ def create_app(settings: Settings | None = None, sms_client: SmsClient | None = 
                shared_sink: SharedDataSink | None = None) -> FastAPI:
     settings = settings or Settings()  # fails fast on bad/missing env vars
     engine, Session = make_session_factory(settings.database_url)
-    Base.metadata.create_all(engine)  # TODO: Alembic migrations
+    ensure_schema(engine)
     sms_client = sms_client or ATClient(settings.at_username,
                                         settings.at_api_key.get_secret_value(),
                                         settings.at_sender, settings.at_sandbox)
