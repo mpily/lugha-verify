@@ -1,7 +1,7 @@
 from sqlalchemy import select
 
 from app.models import Payout
-from app.payouts import (AirtimeResult, FakeAirtimeClient, airtime_status_callback,
+from app.payouts import (DUPLICATE_ERROR, AirtimeResult, FakeAirtimeClient, airtime_status_callback,
                          flush_payouts, parse_airtime_response)
 from tests.conftest import KEY
 
@@ -90,3 +90,41 @@ def test_parse_response():
         {"status": "Failed", "errorMessage": "Insufficient Credit", "requestId": "None"}]})
     assert bad.state == "failed" and bad.request_id is None and "Insufficient" in bad.error
     assert parse_airtime_response({"errorMessage": "Invalid", "responses": []}).state == "failed"
+
+
+DUPLICATE_BODY = {"errorMessage": "A duplicate request was received within the last 5 minutes",
+                  "numSent": 0, "responses": [], "totalAmount": "0", "totalDiscount": "0"}
+
+
+def test_parse_duplicate_is_later():
+    r = parse_airtime_response(DUPLICATE_BODY)
+    assert r.state == "later" and r.error == DUPLICATE_ERROR
+    # something was sent: not treated as a harmless duplicate
+    assert parse_airtime_response({**DUPLICATE_BODY, "numSent": 1}).state == "failed"
+
+
+def test_duplicate_waits_five_minutes_then_pays(w):
+    """AT refuses a second identical amount to one number within 5 min (a
+    speaker who finishes two tasks quickly). The payout waits, then is paid."""
+    closed_item(w)
+    air = FakeAirtimeClient()
+    air.next_results = [AirtimeResult("later", error=DUPLICATE_ERROR)]
+    flush_payouts(w.db, air, KEY, w.clock)
+    p = rows(w)[0]
+    assert p.status == "pending" and p.attempts == 0 and len(air.sent) == 1
+    w.clock.advance(minutes=2)
+    flush_payouts(w.db, air, KEY, w.clock)
+    assert p.status == "pending" and len(air.sent) == 1  # still inside AT's window
+    w.clock.advance(minutes=4)
+    flush_payouts(w.db, air, KEY, w.clock)
+    assert p.status == "sent" and p.attempts == 1 and len(air.sent) == 2
+
+
+def test_duplicate_refusals_never_exhaust_attempts(w):
+    closed_item(w)
+    air = FakeAirtimeClient()
+    air.next_results = [AirtimeResult("later", error=DUPLICATE_ERROR)] * 20  # 2 payouts x 10 rounds
+    for _ in range(10):
+        flush_payouts(w.db, air, KEY, w.clock)
+        w.clock.advance(minutes=6)
+    assert rows(w)[0].status == "pending" and rows(w)[0].attempts == 0

@@ -202,3 +202,14 @@
   tasks, replies and airtime stay on the main account. `/health` shows
   `delivery_sandbox`. `simulate.py --live` ignores the delivery account (its
   recipients are made-up numbers). 157 tests pass; simulate PASS.
+- AT sandbox SMS now works with the user's key, but intermittently: ~40% of
+  identical requests succeed, the rest get 401 (AT: stale key on some of
+  their servers). SMS and airtime clients now retry a 401 up to 4 times
+  (0.5 s apart); a 401 means AT did nothing, so this can't double-send or
+  double-pay. Other errors keep their old handling. Live sim: 22/26 SMS.
+- Bug found on the live sandbox: AT refuses the same airtime amount to the
+  same number twice within 5 min ("A duplicate request was received within
+  the last 5 minutes", numSent 0). It was marked `failed` for good, so a
+  speaker finishing two tasks quickly lost the second payout. Now: payout
+  stays `pending`, retried after 5.5 min, the wait doesn't use attempts.
+  166 tests pass; simulate PASS.
