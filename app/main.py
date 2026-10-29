@@ -182,9 +182,9 @@ def create_app(settings: Settings | None = None, sms_client: SmsClient | None = 
         def do(db, eng):
             is_speaker = db.scalar(select(Speaker.id).where(Speaker.phone_hash == h))
             eng.handle_inbound(h, text, at_id=id)
-            parsed = parse_sms(text)
+            parsed = parse_sms(text, settings.at_keyword)
             if is_speaker is None and isinstance(parsed, Keyword):
-                recipient_keyword(db, h, parsed.word, eng.outbox, clock)
+                recipient_keyword(db, h, parsed.word, eng.outbox, clock, eng.T)
         run(do)
         bg.add_task(flush)
         return {"ok": True}

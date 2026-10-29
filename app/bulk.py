@@ -14,6 +14,7 @@ from .delivery import SentenceInfo, compose_message
 from .models import (Campaign, Candidate, Delivery, Recipient, ReviewItem, SourceText,
                      Translation)
 from .phones import encrypt_phone, hash_phone
+from .sms import templates as T
 from .sms.outbox import DbOutbox
 
 LANG_RE_OK = set("abcdefghijklmnopqrstuvwxyz")
@@ -63,7 +64,8 @@ def list_languages(db: Session, list_id: str) -> set[str]:
 
 
 def recipient_keyword(db: Session, phone_hash: str, word: str, outbox: DbOutbox,
-                      clock: Callable[[], datetime]) -> None:
+                      clock: Callable[[], datetime],
+                      texts: T.Templates | None = None) -> None:
     """STOP / YES from a recipient (not a speaker): opt out of / back into
     every list."""
     rows = db.scalars(select(Recipient).where(Recipient.phone_hash == phone_hash)).all()
@@ -71,9 +73,9 @@ def recipient_keyword(db: Session, phone_hash: str, word: str, outbox: DbOutbox,
         return
     for r in rows:
         r.opted_out_at = clock() if word == "STOP" else None
-    outbox.send_phone(rows[0].phone_enc, "You will get no more messages from this sender. "
-                      "Reply YES to rejoin." if word == "STOP" else
-                      "You will receive messages again. Reply STOP to leave.")
+    texts = texts or T.Templates()
+    outbox.send_phone(rows[0].phone_enc, texts.recipient_stop_sms() if word == "STOP"
+                      else texts.recipient_yes_sms())
 
 
 def _items(db: Session, campaign_id: int) -> list[ReviewItem]:

@@ -178,3 +178,18 @@
   (image `registry.africastalking.dev/zej2a1/lugha-verify:latest`) behind a
   test job (SQLite, Postgres service, simulate) and a < 1 GB size check;
   pushes only on `main`, PRs build without pushing. Not run yet on GitHub.
+- First live AT checks (2026-10-29, from a local machine):
+  - Sandbox: airtime works (`201 Sent`, response format as coded). SMS and
+    `/version1/user` return 401 "The supplied authentication is invalid"
+    with the same key, also with a fresh key and via AT's official Python
+    SDK: account-side, raised with AT. `/version1/messaging/bulk` is 404 on
+    the sandbox.
+  - Live (no sender set yet): AT accepts the key; every number, including an
+    AT staff number, returns `UserInBlacklist` (406), also via the official
+    SDK. `parse_send_response` reads AT's real reply correctly. Waiting for
+    the customer's shortcode.
+  - HF Space: real call works (~12 s from asleep), swh→dav, `[?word]` marks.
+- `AT_KEYWORD` for shared shortcodes: the parser drops a leading keyword
+  (`LUGHA K7P2 5`; replies without it still work), and every SMS that says
+  what to type shows it (`Reply: LUGHA K7P2 5`, `Reply LUGHA YES`), incl.
+  recipient STOP/YES. Unset = texts unchanged. 150 tests pass; simulate PASS.

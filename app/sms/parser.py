@@ -50,8 +50,19 @@ def _strip_quotes(s: str) -> str:
     return s
 
 
-def parse_sms(raw: str) -> Parsed:
-    text = normalize_text(raw or "")
+def strip_keyword(text: str, keyword: str | None) -> str:
+    """On a shared shortcode every message starts with our keyword
+    (AT_KEYWORD), e.g. "LUGHA K7P2 5". Drop it; text without it is kept as is."""
+    if not keyword:
+        return text
+    first, _, rest = text.partition(" ")
+    if first.rstrip(".,:;!").upper() == keyword.upper():
+        return rest.strip()
+    return text
+
+
+def parse_sms(raw: str, keyword: str | None = None) -> Parsed:
+    text = strip_keyword(normalize_text(raw or ""), keyword)
     if not text:
         return ParseError("empty")
     bare = re.sub(r"[.!]+$", "", text).upper()

@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     at_api_key: SecretStr
     at_shortcode: str | None = None
     at_sender_id: str | None = None
+    # Shared shortcode: AT forwards only messages starting with this keyword
+    # (e.g. LUGHA). Leave unset for a dedicated shortcode.
+    at_keyword: str | None = None
 
     # Shared secret added to the AT callback URLs (?token=...). AT does not
     # sign callbacks, so this is the check we can do. Strongly recommended.
@@ -60,6 +63,16 @@ class Settings(BaseSettings):
                              "(python -c 'from cryptography.fernet import Fernet;"
                              "print(Fernet.generate_key().decode())')") from e
         return v
+
+    @field_validator("at_keyword")
+    @classmethod
+    def _valid_keyword(cls, v: str | None) -> str | None:
+        v = (v or "").strip()
+        if not v:
+            return None
+        if not (v.isascii() and v.isalnum() and len(v) <= 20):
+            raise ValueError("AT_KEYWORD must be one word of letters/digits (max 20)")
+        return v.upper()
 
     @model_validator(mode="after")
     def _check(self) -> "Settings":
