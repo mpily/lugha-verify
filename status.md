@@ -164,3 +164,17 @@
   downgrade works. 131 passed on Postgres, 130 + 1 Postgres-only skip on SQLite.
   Future schema changes: edit models, then
   `DATABASE_URL=... alembic revision --autogenerate -m "..."` and commit it.
+- Build step 6 (image): `Dockerfile` multi-stage on python:3.12-slim,
+  non-root, healthcheck; entrypoint migrates then runs one uvicorn process.
+  **Image size 301 MB** (docker image inspect, 2026-10-29). No proxy settings
+  or CA in the image history (optional CA is a BuildKit secret, only for
+  builds behind a TLS-intercepting proxy like this session's).
+  Container tested against Postgres 16: migrated an empty DB on start, health
+  OK, `scripts/smoke.sh` PASS, speaker opt-in / list / campaign start worked;
+  Space unreachable → draft gave up after retries → item started with no
+  candidate; AT unreachable → SMS retried 5× then `failed`; no phone numbers
+  in logs. Test suite also passes on Python 3.12 (CI version), both DBs.
+- CI: `.github/workflows/docker.yml` = the AT-provided build/push steps
+  (image `registry.africastalking.dev/zej2a1/lugha-verify:latest`) behind a
+  test job (SQLite, Postgres service, simulate) and a < 1 GB size check;
+  pushes only on `main`, PRs build without pushing. Not run yet on GitHub.

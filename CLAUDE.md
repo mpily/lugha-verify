@@ -25,7 +25,7 @@ original plan; where they and §15 disagree, §15 wins.
 
 ```bash
 pip install -r requirements-dev.txt
-python -m pytest -q                 # 129 tests, ~12 s
+python -m pytest -q                 # ~130 tests, ~12 s (TEST_DATABASE_URL=postgresql://... for Postgres)
 python scripts/simulate.py          # end-to-end scenario, offline; must print PASS
 cp .env.example .env                # fill in, then:
 uvicorn app.main:app --port 8000    # portal at /portal (log in with ADMIN_TOKEN)
@@ -44,7 +44,7 @@ tests and `simulate.py` before every push; log results in `status.md`.
 | 3 Airtime payouts, bulk delivery | done (offline); airtime request format unconfirmed |
 | 4 Portal, export | done |
 | 5 Space translator, research report | done; **Space never reached from the build session** |
-| 6 Dockerfile ≤ 1 GB, AT registry, Marketplace form | **next** — blocked on the open questions below |
+| 6 Dockerfile ≤ 1 GB, AT registry, Marketplace form | image built (301 MB) and tested on Postgres; CI workflow pushes on `main` — **first push not done yet** (needs merge to `main` + registry secrets) |
 | 7 Customer model endpoint, USSD, network HTTP adapters | not started |
 
 ### Code map (actual layout; differs a little from §11)
@@ -89,12 +89,16 @@ tests and `simulate.py` before every push; log results in `status.md`.
    `parse_airtime_response`) if needed.
 2. **The Space translator** (`DefaultApiTranslator`) is tested only against
    a mock of `hf_space/api/CONTRACT.md`. Call it once for real.
-3. No Alembic migrations yet (`create_all`); fine for a fresh database only.
+3. Schema changes need an Alembic migration (`migrations/`); on Postgres the
+   app refuses to start if the schema isn't at the latest one.
 
 ### Open questions (ask the project owner; don't guess)
 
 - Marketplace: which database it provisions, whether the 1 GB limit covers
-  the database, registry push instructions, public URL format for callbacks.
+  the database, public URL format for callbacks. (Registry: answered —
+  GitHub Actions pushes `registry.africastalking.dev/zej2a1/lugha-verify:latest`
+  on push to `main`, using repo secrets `REGISTRY_HOST`,
+  `REGISTRY_USERNAME`, `REGISTRY_PASSWORD`.)
 - Data sharing: is setting `SHARED_DATA_URL` enough as the customer's
   consent to share source sentences, or add a per-campaign switch?
 
@@ -103,7 +107,17 @@ tests and `simulate.py` before every push; log results in `status.md`.
 Gold items (`is_gold` column exists), accept/reject counters and priority
 sinking, trusted-review queue for disagreements, login rate limiting,
 customer model translator + SSRF guard, USSD, network/shared HTTP central
-services (interfaces exist; local implementations used), Dockerfile.
+services (interfaces exist; local implementations used).
+
+### Image (step 6)
+
+`Dockerfile` (multi-stage, python:3.12-slim, non-root, healthcheck) →
+`docker-entrypoint.sh` runs `alembic upgrade head` then ONE uvicorn process.
+Build locally: `docker build -t lugha-verify .` (behind a TLS-intercepting
+proxy add `--secret id=ca,src=<ca.crt>`). CI: `.github/workflows/docker.yml`
+runs tests on SQLite + Postgres + simulate, builds, checks < 1 GB, pushes on
+`main` only. Deploy check: `scripts/smoke.sh`. Form answers:
+`docs/marketplace_submission.md`.
 
 ---
 
