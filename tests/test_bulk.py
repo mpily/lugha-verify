@@ -9,7 +9,7 @@ from app.models import Delivery, Recipient
 from app.payouts import FakeAirtimeClient
 from app.sms.at_client import FakeSmsClient
 from app.translators.base import FakeTranslator
-from tests.conftest import Clock, make_settings
+from tests.conftest import Clock, make_settings, reset_db
 
 ADMIN = {"Authorization": "Bearer t"}
 S = make_settings()
@@ -53,6 +53,7 @@ def test_one_unverified_sentence_makes_whole_message_fallback():
 
 
 def make():
+    reset_db()
     sms = FakeSmsClient()
     clock = Clock()
     app = create_app(S, sms_client=sms, clock=clock, start_scheduler=False,

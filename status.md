@@ -151,3 +151,8 @@
   the translate-from-scratch Swahili path.
 - CLAUDE.md: added §0 (state, quick start, code map, unverified items, open
   questions, gaps) and §15 (decisions log) so a collaborator can join.
+- Postgres support: `psycopg[binary]` driver; `postgres://` and
+  `postgresql://` URLs are mapped to the psycopg driver; `pool_pre_ping`.
+  Whole suite runs against Postgres with `TEST_DATABASE_URL=postgresql://...`:
+  129 passed on Postgres 16 (and on SQLite). simulate.py `--db` on
+  Postgres 16: PASS.

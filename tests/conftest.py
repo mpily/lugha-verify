@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import random
 from datetime import datetime, timedelta
 
@@ -13,6 +14,26 @@ from app.phones import encrypt_phone, hash_phone
 from app.review.engine import ReviewEngine
 
 T0 = datetime(2026, 10, 29, 9, 0, 0)
+# Set TEST_DATABASE_URL=postgresql://... to run the suite against Postgres.
+TEST_DB = os.environ.get("TEST_DATABASE_URL", "sqlite://")
+
+
+def reset_db() -> None:
+    """Fresh empty schema for each test on Postgres (in-memory SQLite is
+    fresh anyway). Ends other sessions first so leaked pools can't block it."""
+    if TEST_DB.startswith("sqlite"):
+        return
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.pool import NullPool
+    from app.db import normalize_db_url
+    eng = create_engine(normalize_db_url(TEST_DB), poolclass=NullPool,
+                        isolation_level="AUTOCOMMIT")
+    with eng.connect() as c:
+        c.execute(text("SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                       "WHERE datname = current_database() AND pid <> pg_backend_pid()"))
+        c.execute(text("DROP SCHEMA public CASCADE"))
+        c.execute(text("CREATE SCHEMA public"))
+    eng.dispose()
 KEY = Fernet.generate_key().decode()
 SALT = "test-salt"
 
@@ -20,8 +41,10 @@ SALT = "test-salt"
 def make_settings(**kw) -> Settings:
     base = dict(at_username="sandbox", at_api_key="k", at_shortcode="12345",
                 phone_enc_key=KEY, phone_hash_salt=SALT, admin_token="t",
-                database_url="sqlite://")
+                database_url=TEST_DB)
     base.update(kw)
+    if base["database_url"] == TEST_DB:
+        reset_db()
     return Settings(_env_file=None, **base)
 
 
@@ -50,7 +73,7 @@ class Outbox:
 class World:
     def __init__(self, **settings_kw):
         self.settings = make_settings(**settings_kw)
-        engine, factory = make_session_factory("sqlite://")
+        engine, factory = make_session_factory(self.settings.database_url)
         Base.metadata.create_all(engine)
         self.db = factory()
         self.clock = Clock()

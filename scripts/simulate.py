@@ -63,11 +63,13 @@ class SimClock:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--live", action="store_true", help="send SMS via AT sandbox")
+    ap.add_argument("--db", default="sqlite://",
+                    help="database URL (must be EMPTY; default: in-memory SQLite)")
     args = ap.parse_args(argv)
 
     clock = SimClock()
     if args.live:
-        settings = Settings(database_url="sqlite://", at_callback_token=None)
+        settings = Settings(database_url=args.db, at_callback_token=None)
         if not settings.at_sandbox:
             print("refusing --live outside the sandbox (AT_USERNAME must be 'sandbox')")
             return 2
@@ -76,7 +78,7 @@ def main(argv=None) -> int:
         settings = Settings(_env_file=None, at_username="sandbox", at_api_key="x",
                             at_shortcode="12345", phone_enc_key=Fernet.generate_key().decode(),
                             phone_hash_salt="sim", admin_token="sim",
-                            database_url="sqlite://")
+                            database_url=args.db)
         client, air = FakeSmsClient(), FakeAirtimeClient()
     # The translator is always simulated: the Space is a separate service.
     translator = FakeTranslator({(SW_FIXED, "dav"): DAV2})
