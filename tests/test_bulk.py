@@ -139,3 +139,31 @@ def test_delivery_report_reaches_delivery_row():
     c.post("/at/sms/delivery", data={"id": mid, "status": "Success"})
     st_ = c.get(f"/api/campaigns/{cid}", headers=ADMIN).json()
     assert st_["deliveries"] == {"eng": {"n": 1, "fallback": 0, "delivered": 1}}
+
+
+def test_english_and_swahili_recipients_get_it_at_once():
+    app, c, sms, clock = make()
+    c.post("/api/lists/L/recipients", headers=ADMIN,
+           content="0711000001,eng\n0711000002,swh\n0711000003,dav\n")
+    cid = c.post("/api/campaigns", headers=ADMIN, json={
+        "mode": "bulk", "list_id": "L", "fallback_lang": "eng",
+        "sources": [{"text": "Hello", "swahili_text": "Habari"}]}).json()["id"]
+    c.post(f"/api/campaigns/{cid}/start", headers=ADMIN)
+    assert sms.to("+254711000001") == ["Hello"] and sms.to("+254711000002") == ["Habari"]
+    assert sms.to("+254711000003") == []  # dav still under review
+    assert c.get(f"/api/campaigns/{cid}", headers=ADMIN).json()["status"] == "running"
+    clock.advance(minutes=121); app.state.tick()
+    assert sms.to("+254711000003") == ["Hello"]  # fallback after deadline
+    assert sms.to("+254711000001") == ["Hello"]  # not sent twice
+    assert c.get(f"/api/campaigns/{cid}", headers=ADMIN).json()["status"] == "delivered"
+
+
+def test_swahili_fallback_waits_for_swahili_review():
+    app, c, sms, clock = make()
+    c.post("/api/lists/L/recipients", headers=ADMIN, content="0711000001,eng\n0711000003,dav\n")
+    cid = c.post("/api/campaigns", headers=ADMIN, json={
+        "mode": "bulk", "list_id": "L", "fallback_lang": "swh",
+        "sources": [{"text": "Hello"}]}).json()["id"]
+    c.post(f"/api/campaigns/{cid}/start", headers=ADMIN)
+    assert sms.to("+254711000001") == ["Hello"]
+    assert sms.to("+254711000003") == []

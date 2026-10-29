@@ -87,9 +87,9 @@ def _translation(db: Session, source_id: int, lang: str) -> Translation | None:
 
 
 def deliver(db: Session, settings: Settings, c: Campaign, outbox: DbOutbox,
-            clock: Callable[[], datetime]) -> int:
-    """Queue one SMS per recipient. Safe to call twice (one delivery per
-    recipient per campaign)."""
+            clock: Callable[[], datetime], open_langs: set[str] = frozenset()) -> int:
+    """Queue one SMS per recipient whose message no longer depends on an open
+    review item. Safe to call repeatedly (one delivery per recipient)."""
     sources = list(db.scalars(select(SourceText).where(SourceText.campaign_id == c.id)
                               .order_by(SourceText.id)).all())
     done = set(db.scalars(select(Delivery.recipient_id)
@@ -116,6 +116,10 @@ def deliver(db: Session, settings: Settings, c: Campaign, outbox: DbOutbox,
     for r in recips:
         if r.id in done or r.opted_out_at is not None:
             continue
+        if r.preferred_lang in open_langs or (
+                c.fallback_lang == "swh" and "swh" in open_langs
+                and r.preferred_lang != c.source_lang):
+            continue  # still under review (or its Swahili fallback is)
         msg = compose_message(recipient_lang=r.preferred_lang, source_lang=c.source_lang,
                               fallback_lang=c.fallback_lang,
                               sentences=sentences(r.preferred_lang),
@@ -132,14 +136,15 @@ def deliver(db: Session, settings: Settings, c: Campaign, outbox: DbOutbox,
 
 def finish_campaigns(db: Session, settings: Settings, outbox: DbOutbox,
                      clock: Callable[[], datetime]) -> None:
-    """When every review item of a running campaign is closed (the engine
-    closes them at the deadline at the latest): deliver (bulk) or finish
-    (research)."""
+    """Bulk: a recipient is sent their message as soon as nothing it could
+    contain is still under review: no open item in their language and, when
+    the fallback is Swahili, no open Swahili item. So English and Swahili
+    recipients get it at once (CLAUDE.md §3), the rest after review. When
+    every item is closed the campaign is `delivered` (bulk) or `done`."""
     for c in db.scalars(select(Campaign).where(Campaign.status == "running")).all():
-        if any(i.state != "closed" for i in _items(db, c.id)):
-            continue
+        items = _items(db, c.id)
+        open_langs = {i.lang for i in items if i.state != "closed"}
         if c.mode == "bulk":
-            deliver(db, settings, c, outbox, clock)
-            c.status = "delivered"
-        else:
-            c.status = "done"
+            deliver(db, settings, c, outbox, clock, open_langs=open_langs)
+        if not open_langs:
+            c.status = "delivered" if c.mode == "bulk" else "done"

@@ -178,3 +178,10 @@
   (image `registry.africastalking.dev/zej2a1/lugha-verify:latest`) behind a
   test job (SQLite, Postgres service, simulate) and a < 1 GB size check;
   pushes only on `main`, PRs build without pushing. Not run yet on GitHub.
+- Fix (spec §3, demo §14): English/Swahili recipients now get the message
+  as soon as the campaign starts; others when nothing their message could
+  contain is still under review (their language, and Swahili when the
+  fallback is Swahili). Campaign is `delivered` once every item is closed.
+  Also fixed: an item still waiting for its machine draft at the deadline is
+  now closed by the tick (before, a stuck draft could hold the campaign).
+  132 tests pass; simulate PASS.
