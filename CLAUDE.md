@@ -76,7 +76,7 @@ tests and `simulate.py` before every push; log results in `status.md`.
 - AT callbacks (append `?token=AT_CALLBACK_TOKEN`): `POST /at/sms/inbound`,
   `POST /at/sms/delivery`, `POST /at/airtime/status`.
 - Portal: `/portal` (login with `ADMIN_TOKEN`; HMAC cookie + CSRF on forms).
-- Env vars: §10 plus `AT_CALLBACK_TOKEN`, `AT_KEYWORD` (shared shortcode) and `REVIEW_MACHINE_SWAHILI`
+- Env vars: §10 plus `AT_CALLBACK_TOKEN`, `AT_KEYWORD` (shared shortcode), `AT_DELIVERY_*` (second account for the final message only) and `REVIEW_MACHINE_SWAHILI`
   (default on). See `.env.example`.
 
 ### Not verified yet (do these before trusting the demo)

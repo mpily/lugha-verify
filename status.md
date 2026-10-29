@@ -193,3 +193,12 @@
   (`LUGHA K7P2 5`; replies without it still work), and every SMS that says
   what to type shows it (`Reply: LUGHA K7P2 5`, `Reply LUGHA YES`), incl.
   recipient STOP/YES. Unset = texts unchanged. 150 tests pass; simulate PASS.
+- Live bulk SMS works with sender ID `AFTKNG` (`Success`, KES 0.80): the
+  earlier `UserInBlacklist` errors were from sending with no sender.
+  Two-way SMS works on the sandbox (AT fixed the 401).
+- Hybrid accounts (user decision 2026-10-29): optional `AT_DELIVERY_USERNAME`,
+  `AT_DELIVERY_API_KEY`, `AT_DELIVERY_SENDER` (all or none). Only outbox rows
+  with a delivery (the final message to recipients) go through it; opt-ins,
+  tasks, replies and airtime stay on the main account. `/health` shows
+  `delivery_sandbox`. `simulate.py --live` ignores the delivery account (its
+  recipients are made-up numbers). 157 tests pass; simulate PASS.
