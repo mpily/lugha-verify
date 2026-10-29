@@ -65,7 +65,7 @@ def add_speaker(db: Session, eng: ReviewEngine, settings: Settings, body: Speake
     sp.source = body.source
     db.flush()
     if sp.opted_in_at is None and sp.opted_out_at is None:
-        eng.outbox.send(sp, T.opt_in_prompt())
+        eng.outbox.send(sp, eng.T.opt_in_prompt())
     return speaker_out(sp)
 
 

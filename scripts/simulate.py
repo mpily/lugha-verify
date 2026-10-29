@@ -69,7 +69,11 @@ def main(argv=None) -> int:
 
     clock = SimClock()
     if args.live:
-        settings = Settings(database_url=args.db, at_callback_token=None)
+        # Ignore any AT_DELIVERY_* account: the recipients here are made-up
+        # numbers, so their messages must stay on the sandbox.
+        settings = Settings(database_url=args.db, at_callback_token=None,
+                            at_delivery_username=None, at_delivery_api_key=None,
+                            at_delivery_sender=None)
         if not settings.at_sandbox:
             print("refusing --live outside the sandbox (AT_USERNAME must be 'sandbox')")
             return 2

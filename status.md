@@ -178,3 +178,38 @@
   (image `registry.africastalking.dev/zej2a1/lugha-verify:latest`) behind a
   test job (SQLite, Postgres service, simulate) and a < 1 GB size check;
   pushes only on `main`, PRs build without pushing. Not run yet on GitHub.
+- First live AT checks (2026-10-29, from a local machine):
+  - Sandbox: airtime works (`201 Sent`, response format as coded). SMS and
+    `/version1/user` return 401 "The supplied authentication is invalid"
+    with the same key, also with a fresh key and via AT's official Python
+    SDK: account-side, raised with AT. `/version1/messaging/bulk` is 404 on
+    the sandbox.
+  - Live (no sender set yet): AT accepts the key; every number, including an
+    AT staff number, returns `UserInBlacklist` (406), also via the official
+    SDK. `parse_send_response` reads AT's real reply correctly. Waiting for
+    the customer's shortcode.
+  - HF Space: real call works (~12 s from asleep), swh→dav, `[?word]` marks.
+- `AT_KEYWORD` for shared shortcodes: the parser drops a leading keyword
+  (`LUGHA K7P2 5`; replies without it still work), and every SMS that says
+  what to type shows it (`Reply: LUGHA K7P2 5`, `Reply LUGHA YES`), incl.
+  recipient STOP/YES. Unset = texts unchanged. 150 tests pass; simulate PASS.
+- Live bulk SMS works with sender ID `AFTKNG` (`Success`, KES 0.80): the
+  earlier `UserInBlacklist` errors were from sending with no sender.
+  Two-way SMS works on the sandbox (AT fixed the 401).
+- Hybrid accounts (user decision 2026-10-29): optional `AT_DELIVERY_USERNAME`,
+  `AT_DELIVERY_API_KEY`, `AT_DELIVERY_SENDER` (all or none). Only outbox rows
+  with a delivery (the final message to recipients) go through it; opt-ins,
+  tasks, replies and airtime stay on the main account. `/health` shows
+  `delivery_sandbox`. `simulate.py --live` ignores the delivery account (its
+  recipients are made-up numbers). 157 tests pass; simulate PASS.
+- AT sandbox SMS now works with the user's key, but intermittently: ~40% of
+  identical requests succeed, the rest get 401 (AT: stale key on some of
+  their servers). SMS and airtime clients now retry a 401 up to 4 times
+  (0.5 s apart); a 401 means AT did nothing, so this can't double-send or
+  double-pay. Other errors keep their old handling. Live sim: 22/26 SMS.
+- Bug found on the live sandbox: AT refuses the same airtime amount to the
+  same number twice within 5 min ("A duplicate request was received within
+  the last 5 minutes", numSent 0). It was marked `failed` for good, so a
+  speaker finishing two tasks quickly lost the second payout. Now: payout
+  stays `pending`, retried after 5.5 min, the wait doesn't use attempts.
+  166 tests pass; simulate PASS.

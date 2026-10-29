@@ -5,6 +5,7 @@ reachable from the build sandbox, so check against a live sandbox call.
 """
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -13,6 +14,22 @@ import httpx
 LIVE_URL = "https://api.africastalking.com/version1/messaging"
 SANDBOX_URL = "https://api.sandbox.africastalking.com/version1/messaging"
 OK_CODES = {100, 101, 102}  # Processed, Sent, Queued
+# AT's sandbox sometimes rejects a valid key with 401 (seen 2026-10-29: ~60%
+# of identical requests). A 401 means AT did nothing, so trying the same
+# request again cannot send twice. Other errors are not retried here.
+AUTH_RETRIES = 4
+AUTH_RETRY_DELAY = 0.5
+
+
+def post_with_auth_retry(http: httpx.Client, url: str, retries: int, delay: float,
+                         **kw) -> httpx.Response:
+    r = http.post(url, **kw)
+    for _ in range(retries):
+        if r.status_code != 401:
+            break
+        time.sleep(delay)
+        r = http.post(url, **kw)
+    return r
 
 
 @dataclass
@@ -29,8 +46,10 @@ class SmsClient(Protocol):
 
 class ATClient:
     def __init__(self, username: str, api_key: str, sender: str | None,
-                 sandbox: bool, timeout: float = 20.0):
+                 sandbox: bool, timeout: float = 20.0,
+                 auth_retries: int = AUTH_RETRIES, retry_delay: float = AUTH_RETRY_DELAY):
         self.username, self.api_key, self.sender = username, api_key, sender
+        self.auth_retries, self.retry_delay = auth_retries, retry_delay
         self.url = SANDBOX_URL if sandbox else LIVE_URL
         self.http = httpx.Client(timeout=timeout)
 
@@ -38,8 +57,9 @@ class ATClient:
         data = {"username": self.username, "to": phone, "message": text}
         if self.sender:
             data["from"] = self.sender
-        r = self.http.post(self.url, data=data, headers={
-            "apiKey": self.api_key, "Accept": "application/json"})
+        r = post_with_auth_retry(self.http, self.url, self.auth_retries, self.retry_delay,
+                                 data=data, headers={"apiKey": self.api_key,
+                                                     "Accept": "application/json"})
         if r.status_code >= 400:
             return SendResult(False, None, f"http_{r.status_code}")
         return parse_send_response(r.json())

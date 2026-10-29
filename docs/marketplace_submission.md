@@ -31,7 +31,12 @@ Required:
 | `ADMIN_TOKEN` | customer's login for the portal and API |
 
 Recommended: `AT_CALLBACK_TOKEN` (random string; add `?token=…` to the AT
-callback URLs). Optional: `TRANSLATE_API_URL`, `REVIEW_REQUIRED_LANGS`,
+callback URLs). On a shared shortcode set `AT_KEYWORD` (e.g. `LUGHA`): AT
+forwards only messages that start with it, and every SMS tells people to type
+it first. `AT_DELIVERY_USERNAME`, `AT_DELIVERY_API_KEY`, `AT_DELIVERY_SENDER`
+(all three or none): a second AT account used only for the final message to
+recipients, e.g. a bulk sender ID while two-way tasks use a shortcode on
+another account. Optional: `TRANSLATE_API_URL`, `REVIEW_REQUIRED_LANGS`,
 `REVIEW_MACHINE_SWAHILI`, `SHARED_DATA_URL`, `PAYOUT_PER_ITEM_KES` and the
 timing variables in CLAUDE.md §10.
 

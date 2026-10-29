@@ -48,13 +48,19 @@ def create_app(settings: Settings | None = None, sms_client: SmsClient | None = 
                start_scheduler: bool = True,
                translator: Translator | None = None,
                airtime_client: AirtimeClient | None = None,
-               shared_sink: SharedDataSink | None = None) -> FastAPI:
+               shared_sink: SharedDataSink | None = None,
+               delivery_sms_client: SmsClient | None = None) -> FastAPI:
     settings = settings or Settings()  # fails fast on bad/missing env vars
     engine, Session = make_session_factory(settings.database_url)
     ensure_schema(engine)
     sms_client = sms_client or ATClient(settings.at_username,
                                         settings.at_api_key.get_secret_value(),
                                         settings.at_sender, settings.at_sandbox)
+    if delivery_sms_client is None and settings.has_delivery_account:
+        delivery_sms_client = ATClient(settings.at_delivery_username,
+                                       settings.at_delivery_api_key.get_secret_value(),
+                                       settings.at_delivery_sender,
+                                       settings.delivery_sandbox)
     translator = translator or DefaultApiTranslator(settings.translate_api_url)
     airtime_client = airtime_client or ATAirtimeClient(
         settings.at_username, settings.at_api_key.get_secret_value(), settings.at_sandbox)
@@ -74,7 +80,8 @@ def create_app(settings: Settings | None = None, sms_client: SmsClient | None = 
 
     def flush():
         with lock, Session() as db:
-            n = flush_outbox(db, sms_client, key, clock)
+            n = flush_outbox(db, sms_client, key, clock,
+                             delivery_client=delivery_sms_client)
             flush_payouts(db, airtime_client, key, clock)
             return n
 
@@ -168,7 +175,8 @@ def create_app(settings: Settings | None = None, sms_client: SmsClient | None = 
 
     @app.get("/health")
     def health():
-        return {"ok": True, "at_sandbox": settings.at_sandbox}
+        return {"ok": True, "at_sandbox": settings.at_sandbox,
+                "delivery_sandbox": settings.delivery_sandbox}
 
     # ------------------------------------------------------- AT callbacks
     @app.post("/at/sms/inbound", dependencies=[Depends(check_callback)])
@@ -182,9 +190,9 @@ def create_app(settings: Settings | None = None, sms_client: SmsClient | None = 
         def do(db, eng):
             is_speaker = db.scalar(select(Speaker.id).where(Speaker.phone_hash == h))
             eng.handle_inbound(h, text, at_id=id)
-            parsed = parse_sms(text)
+            parsed = parse_sms(text, settings.at_keyword)
             if is_speaker is None and isinstance(parsed, Keyword):
-                recipient_keyword(db, h, parsed.word, eng.outbox, clock)
+                recipient_keyword(db, h, parsed.word, eng.outbox, clock, eng.T)
         run(do)
         bg.add_task(flush)
         return {"ok": True}

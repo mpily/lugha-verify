@@ -15,6 +15,16 @@ class Settings(BaseSettings):
     at_api_key: SecretStr
     at_shortcode: str | None = None
     at_sender_id: str | None = None
+    # Shared shortcode: AT forwards only messages starting with this keyword
+    # (e.g. LUGHA). Leave unset for a dedicated shortcode.
+    at_keyword: str | None = None
+
+    # Optional second AT account used ONLY for the final message to
+    # recipients (e.g. two-way tasks on the sandbox, delivery on live with a
+    # bulk sender ID). Unset = everything goes through the account above.
+    at_delivery_username: str | None = None
+    at_delivery_api_key: SecretStr | None = None
+    at_delivery_sender: str | None = None
 
     # Shared secret added to the AT callback URLs (?token=...). AT does not
     # sign callbacks, so this is the check we can do. Strongly recommended.
@@ -61,10 +71,25 @@ class Settings(BaseSettings):
                              "print(Fernet.generate_key().decode())')") from e
         return v
 
+    @field_validator("at_keyword")
+    @classmethod
+    def _valid_keyword(cls, v: str | None) -> str | None:
+        v = (v or "").strip()
+        if not v:
+            return None
+        if not (v.isascii() and v.isalnum() and len(v) <= 20):
+            raise ValueError("AT_KEYWORD must be one word of letters/digits (max 20)")
+        return v.upper()
+
     @model_validator(mode="after")
     def _check(self) -> "Settings":
         if not (self.at_shortcode or self.at_sender_id):
             raise ValueError("set AT_SHORTCODE or AT_SENDER_ID")
+        delivery = (self.at_delivery_username, self.at_delivery_api_key,
+                    self.at_delivery_sender)
+        if any(delivery) and not all(delivery):
+            raise ValueError("set all of AT_DELIVERY_USERNAME, AT_DELIVERY_API_KEY "
+                             "and AT_DELIVERY_SENDER, or none of them")
         if self.payout_per_item_kes < 2 or self.payout_per_item_kes % 2:
             raise ValueError("PAYOUT_PER_ITEM_KES must be an even number >= 2 "
                              "(it is split between two responders)")
@@ -82,6 +107,17 @@ class Settings(BaseSettings):
     @property
     def at_sandbox(self) -> bool:
         return self.at_username == "sandbox"
+
+    @property
+    def has_delivery_account(self) -> bool:
+        return bool(self.at_delivery_username)
+
+    @property
+    def delivery_sandbox(self) -> bool:
+        """Whether the final message to recipients goes through the sandbox."""
+        if self.has_delivery_account:
+            return self.at_delivery_username == "sandbox"
+        return self.at_sandbox
 
     @property
     def at_sender(self) -> str | None:

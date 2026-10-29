@@ -32,10 +32,13 @@ class DbOutbox:
 
 
 def flush_outbox(db: Session, client: SmsClient, key: str,
-                 clock: Callable[[], datetime], limit: int = 200) -> int:
+                 clock: Callable[[], datetime], limit: int = 200,
+                 delivery_client: SmsClient | None = None) -> int:
     """Send queued SMS. Each row is marked 'sending' and committed before the
     AT call, so a crash can't cause a double send (it leaves the row in
-    'sending' for a human to check instead). Returns the number sent."""
+    'sending' for a human to check instead). Returns the number sent.
+    Final messages to recipients (rows with a delivery) go through
+    delivery_client when given; everything else through client."""
     rows = db.scalars(select(OutboundSms).where(OutboundSms.status == "queued")
                       .order_by(OutboundSms.id).limit(limit)).all()
     n = 0
@@ -43,7 +46,9 @@ def flush_outbox(db: Session, client: SmsClient, key: str,
         row.status, row.attempts = "sending", row.attempts + 1
         db.commit()
         try:
-            res = client.send(decrypt_phone(row.phone_enc, key), row.text)
+            via = delivery_client if (delivery_client is not None
+                                      and row.delivery_id is not None) else client
+            res = via.send(decrypt_phone(row.phone_enc, key), row.text)
         except Exception as e:  # noqa: BLE001  network error: retry later
             row.status = "queued" if row.attempts < MAX_ATTEMPTS else "failed"
             row.at_status = type(e).__name__[:64]

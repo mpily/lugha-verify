@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Callable, Protocol
 
 import httpx
@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 
 from .models import Payout, Speaker
 from .phones import decrypt_phone
+from .sms.at_client import AUTH_RETRIES, AUTH_RETRY_DELAY, post_with_auth_retry
 
 log = logging.getLogger(__name__)
 LIVE_URL = "https://api.africastalking.com/version1/airtime/send"
@@ -31,7 +32,7 @@ MAX_ATTEMPTS = 3
 
 @dataclass
 class AirtimeResult:
-    state: str  # sent | failed | retry | unknown
+    state: str  # sent | failed | retry | later | unknown
     request_id: str | None = None
     error: str | None = None
 
@@ -47,8 +48,18 @@ def airtime_form(username: str, phone: str, amount_kes: int) -> dict:
         [{"phoneNumber": phone, "amount": f"KES {amount_kes}"}])}
 
 
+# AT refuses the same number + amount twice within 5 minutes and pays
+# nothing (numSent 0), e.g. a speaker who finishes two tasks quickly. That
+# payout waits and is sent again later; the wait doesn't use up attempts.
+DUPLICATE_ERROR = "duplicate_within_5min"
+DUPLICATE_WAIT = timedelta(minutes=5, seconds=30)
+
+
 def parse_airtime_response(body: dict) -> AirtimeResult:
     rs = body.get("responses") or []
+    err = str(body.get("errorMessage") or "")
+    if not rs and "duplicate request" in err.lower() and not int(body.get("numSent") or 0):
+        return AirtimeResult("later", None, DUPLICATE_ERROR)
     if not rs:
         return AirtimeResult("failed", None, str(body.get("errorMessage") or "no_response")[:100])
     r = rs[0]
@@ -62,15 +73,20 @@ def parse_airtime_response(body: dict) -> AirtimeResult:
 
 
 class ATAirtimeClient:
-    def __init__(self, username: str, api_key: str, sandbox: bool, timeout: float = 30.0):
+    def __init__(self, username: str, api_key: str, sandbox: bool, timeout: float = 30.0,
+                 auth_retries: int = AUTH_RETRIES, retry_delay: float = AUTH_RETRY_DELAY):
         self.username, self.api_key = username, api_key
+        self.auth_retries, self.retry_delay = auth_retries, retry_delay
         self.url = SANDBOX_URL if sandbox else LIVE_URL
         self.http = httpx.Client(timeout=timeout)
 
     def send(self, phone: str, amount_kes: int) -> AirtimeResult:
         try:
-            r = self.http.post(self.url, data=airtime_form(self.username, phone, amount_kes),
-                               headers={"apiKey": self.api_key, "Accept": "application/json"})
+            # A 401 means AT did nothing (no payment), so retrying it is safe.
+            r = post_with_auth_retry(
+                self.http, self.url, self.auth_retries, self.retry_delay,
+                data=airtime_form(self.username, phone, amount_kes),
+                headers={"apiKey": self.api_key, "Accept": "application/json"})
         except (httpx.ConnectError, httpx.ConnectTimeout) as e:
             return AirtimeResult("retry", error=type(e).__name__)  # never reached AT
         except httpx.HTTPError as e:
@@ -103,6 +119,9 @@ def flush_payouts(db: Session, client: AirtimeClient, key: str,
                       .order_by(Payout.id)).all()
     n = 0
     for p in rows:
+        if (p.error == DUPLICATE_ERROR and p.updated_at is not None
+                and clock() - p.updated_at < DUPLICATE_WAIT):
+            continue  # AT's 5-minute duplicate window: try again later
         p.status, p.attempts, p.updated_at = "sending", p.attempts + 1, clock()
         db.commit()  # recorded before the call
         sp = db.get(Speaker, p.speaker_id)
@@ -115,6 +134,8 @@ def flush_payouts(db: Session, client: AirtimeClient, key: str,
         if res.state == "sent":
             p.status = "sent"
             n += 1
+        elif res.state == "later":
+            p.status, p.attempts = "pending", p.attempts - 1  # AT paid nothing
         elif res.state == "retry" and p.attempts < MAX_ATTEMPTS:
             p.status = "pending"
         elif res.state == "unknown":

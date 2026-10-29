@@ -53,6 +53,7 @@ class ReviewEngine:
         self.db, self.s, self.clock, self.outbox = db, settings, clock, outbox
         self.speakers = speakers or LocalSpeakerSource()
         self.rng = rng or random.SystemRandom()
+        self.T = T.Templates(settings.at_keyword)
 
     # ---------------------------------------------------------------- helpers
     def _send(self, speaker: Speaker, text: str) -> None:
@@ -196,7 +197,7 @@ class ReviewEngine:
                        shown_candidate_id=item.candidate.id)
         self.db.add(t)
         self.db.flush()
-        self._send(sp, T.task_sms(t.code, item.lang, item.candidate.text,
+        self._send(sp, self.T.task_sms(t.code, item.lang, item.candidate.text,
                                   sources[shown], shown))
         return t
 
@@ -289,7 +290,7 @@ class ReviewEngine:
         for t in item.tasks:
             if t.wave > 0 and t.status in ("sent", "no_correction") and now >= t.expires_at:
                 t.status = "expired"
-                self._send(t.speaker, T.expired_sms(t.code))
+                self._send(t.speaker, self.T.expired_sms(t.code))
         wave = max(t.wave for t in item.tasks) if item.tasks else 0
         current = [t for t in item.tasks if t.wave == wave]
         done = all(t.status != "sent" or t.speaker.opted_out_at is not None
@@ -319,7 +320,7 @@ class ReviewEngine:
             if self.db.scalar(select(Payout).where(Payout.review_task_id == t.id)) is None:
                 self.db.add(Payout(review_task_id=t.id, speaker_id=t.speaker_id,
                                    amount_kes=amount, status="pending"))
-            self._send(t.speaker, T.thanks_sms(t.code, amount))
+            self._send(t.speaker, self.T.thanks_sms(t.code, amount))
         paid_ids = {t.id for t, _ in paid}
         for t in item.tasks:
             if t.id in paid_ids:
@@ -331,8 +332,8 @@ class ReviewEngine:
             if t.status != "no_correction":
                 t.status = "late" if outcome != "no_reply" else "expired"
             if notify:
-                self._send(t.speaker, T.filled_sms(t.code) if outcome != "no_reply"
-                           else T.closed_sms(t.code))
+                self._send(t.speaker, self.T.filled_sms(t.code) if outcome != "no_reply"
+                           else self.T.closed_sms(t.code))
         status = status or ("verified" if outcome == "verified" else "speaker_corrected")
         src_id = item.candidate.source_id
         tr = self.db.scalar(select(Translation).where(Translation.source_id == src_id,
@@ -351,7 +352,7 @@ class ReviewEngine:
         now = self.clock()
         if at_id and self.db.scalar(select(InboundSms).where(InboundSms.at_id == at_id)):
             return  # AT retried the callback: already handled
-        parsed = parse_sms(text)
+        parsed = parse_sms(text, self.s.at_keyword)
         prev = self.db.scalars(select(InboundSms).where(InboundSms.from_hash == phone_hash)
                                .order_by(InboundSms.id.desc())).first()
         self.db.add(InboundSms(at_id=at_id, from_hash=phone_hash, text=text, received_at=now,
@@ -365,7 +366,7 @@ class ReviewEngine:
             self._keyword(sp, parsed.word)
         elif isinstance(parsed, ParseError):
             if prev is None or prev.parsed_ok:  # one helpful reply, then ignore
-                self._send(sp, T.parse_error_sms())
+                self._send(sp, self.T.parse_error_sms())
         else:
             self._reply(sp, parsed)
         self.db.flush()
@@ -373,7 +374,7 @@ class ReviewEngine:
     def _keyword(self, sp: Speaker, word: str) -> None:
         now = self.clock()
         if word == "STOP":
-            self._send(sp, T.opted_out_sms())
+            self._send(sp, self.T.opted_out_sms())
             sp.opted_out_at = now
             open_tasks = self.db.scalars(
                 select(ReviewTask).join(ReviewItem)
@@ -385,20 +386,20 @@ class ReviewEngine:
                 self._advance(item)
         elif word == "YES":
             sp.opted_in_at, sp.opted_out_at = now, None
-            self._send(sp, T.opted_in_sms())
+            self._send(sp, self.T.opted_in_sms())
         else:
-            self._send(sp, T.help_sms())
+            self._send(sp, self.T.help_sms())
 
     def _reply(self, sp: Speaker, r: Reply) -> None:
         now = self.clock()
         if sp.opted_in_at is None or sp.opted_out_at is not None:
-            self._send(sp, T.not_opted_in_sms())
+            self._send(sp, self.T.not_opted_in_sms())
             return
         t = self.db.scalars(select(ReviewTask)
                             .where(ReviewTask.code == r.code, ReviewTask.speaker_id == sp.id)
                             .order_by(ReviewTask.sent_at.desc(), ReviewTask.id.desc())).first()
         if t is None:  # unknown code, or someone else's: same answer
-            self._send(sp, T.unknown_code_sms(r.code))
+            self._send(sp, self.T.unknown_code_sms(r.code))
             return
         item = t.item
         self._advance(item)  # apply any timeout that is due before this reply
@@ -407,25 +408,25 @@ class ReviewEngine:
         if t.status == "expired" and t.speaker.opted_out_at is not None:
             return
         if t.shown_candidate_text is None and not r.text:
-            self._send(sp, T.parse_error_sms())
+            self._send(sp, self.T.parse_error_sms())
             return
         t.replied_at, t.stars, t.corrected_text, t.share_consent = now, r.stars, r.text, r.share
         if item.state == "closed":
             t.status = "late"
-            self._send(sp, T.late_reply_sms(t.code))
+            self._send(sp, self.T.late_reply_sms(t.code))
             return
         if t.wave > 0 and (t.status == "expired" or now >= t.expires_at):
             t.status = "late"
-            self._send(sp, T.expired_reply_sms(t.code))
+            self._send(sp, self.T.expired_reply_sms(t.code))
             return
         n_words = len(item.candidate.source.text.split())
         if n_words > 5 and (now - t.sent_at).total_seconds() < self.s.min_reply_seconds:
             t.status = "invalid"
-            self._send(sp, T.too_fast_sms(t.code))
+            self._send(sp, self.T.too_fast_sms(t.code))
             return
         if self._effective(item, t) is None:
             t.status = "no_correction"
-            self._send(sp, T.no_correction_sms(t.code))
+            self._send(sp, self.T.no_correction_sms(t.code))
             if item.state == "trusted" and t.wave == 0:
                 item.state = "fanout"
                 self._send_wave(item)
@@ -444,7 +445,7 @@ class ReviewEngine:
             return
         replies = self._valid_replies(item)
         if len(replies) < 2:
-            self._send(sp, T.thanks_pending_sms(t.code))
+            self._send(sp, self.T.thanks_pending_sms(t.code))
             return
         a, b = replies[:2]
         ea, eb = self._effective(item, a), self._effective(item, b)
