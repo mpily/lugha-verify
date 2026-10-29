@@ -15,6 +15,98 @@ Related repos (do not copy code from them):
 
 ---
 
+## 0. Where the project stands (read this first) — updated 2026-10-29
+
+**New here?** Read §0, then §15 (decisions that override the spec below), then
+`status.md` (detailed log, newest last). The spec sections §1–§14 are the
+original plan; where they and §15 disagree, §15 wins.
+
+### Quick start
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest -q                 # 129 tests, ~12 s
+python scripts/simulate.py          # end-to-end scenario, offline; must print PASS
+cp .env.example .env                # fill in, then:
+uvicorn app.main:app --port 8000    # portal at /portal (log in with ADMIN_TOKEN)
+python scripts/simulate.py --live   # sends real SMS via the AT sandbox (needs .env)
+```
+
+Work on branch `claude/new-session-55hceq`. One change per commit; run the
+tests and `simulate.py` before every push; log results in `status.md`.
+
+### Build order status (§13)
+
+| Step | State |
+|---|---|
+| 1 Data model, parser, state machine | done |
+| 2 AT sandbox SMS, opt-in/STOP, simulate | done (offline); **never run against the real AT sandbox** |
+| 3 Airtime payouts, bulk delivery | done (offline); airtime request format unconfirmed |
+| 4 Portal, export | done |
+| 5 Space translator, research report | done; **Space never reached from the build session** |
+| 6 Dockerfile ≤ 1 GB, AT registry, Marketplace form | **next** — blocked on the open questions below |
+| 7 Customer model endpoint, USSD, network HTTP adapters | not started |
+
+### Code map (actual layout; differs a little from §11)
+
+| Path | What |
+|---|---|
+| `app/main.py` | `create_app()`: AT callbacks, admin REST API, scheduler loops (tick 30 s, machine jobs 10 s, shared export 5 min), mounts portal. All DB work goes through `run(fn)` under one lock; network calls happen outside it. |
+| `app/review/engine.py` | **The core**: review state machine (`drafting → new → trusted → fanout → closed`), inbound SMS handling, payouts creation, Swahili pivot, re-translation, first drafts. Never commits; caller owns the transaction. |
+| `app/review/setup.py` | Which review items a source sentence gets. |
+| `app/delivery.py` | `choose_delivery_text` (per sentence) + `compose_message` (whole SMS). **The only place that decides what a recipient receives.** |
+| `app/bulk.py` | Recipient CSV import, recipient STOP/YES, campaign completion + delivery. |
+| `app/payouts.py` | Airtime: AT client, idempotent flush, status callback. |
+| `app/sms/` | Pure parser, task codes, GSM-7/UCS-2 segment counter, message templates, AT SMS client, DB outbox (`outbound_sms`). |
+| `app/translators/` | `Translator` protocol, `FakeTranslator`, `DefaultApiTranslator` (Space, swh→dav only). |
+| `app/speakers/local.py` | `SpeakerSource`: eligibility + priority ordering. |
+| `app/services.py` | Customer actions shared by REST and portal. |
+| `app/exports.py` | Customer export (CSV/JSONL) and consent-only shared export (`SharedDataSink`). |
+| `app/reports.py` | Research report: stars (t CI), Wilson rates, chrF (own implementation, checked against sacrebleu), agreement. |
+| `app/web/` | Portal (Jinja2, no JS, < 8 KB pages, checked at 375 px). |
+| `scripts/simulate.py` | The A/B/C/D/E scenario of §15 end to end through the HTTP callbacks, plus delivery and report. |
+| `tests/` | `conftest.py` has `World` (in-memory DB + fake clock + fake outbox) for engine tests. |
+
+### Interfaces
+
+- REST (bearer `ADMIN_TOKEN`): `POST /api/speakers`, `POST /api/lists/{id}/recipients`
+  (CSV body), `POST /api/campaigns`, `POST /api/campaigns/{id}/start`,
+  `GET /api/campaigns/{id}`, `GET /api/campaigns/{id}/export?format=csv|jsonl`,
+  `GET /api/campaigns/{id}/report?format=json|csv`, `GET /health`.
+- AT callbacks (append `?token=AT_CALLBACK_TOKEN`): `POST /at/sms/inbound`,
+  `POST /at/sms/delivery`, `POST /at/airtime/status`.
+- Portal: `/portal` (login with `ADMIN_TOKEN`; HMAC cookie + CSRF on forms).
+- Env vars: §10 plus `AT_CALLBACK_TOKEN` and `REVIEW_MACHINE_SWAHILI`
+  (default on). See `.env.example`.
+
+### Not verified yet (do these before trusting the demo)
+
+1. **AT SMS and airtime request/response formats** were written from memory:
+   developers.africastalking.com, the AT API and the HF Space were all
+   blocked by the build session's network. First real run:
+   `python scripts/simulate.py --live`, then fix `app/sms/at_client.py`
+   (`parse_send_response`) and `app/payouts.py` (`airtime_form`,
+   `parse_airtime_response`) if needed.
+2. **The Space translator** (`DefaultApiTranslator`) is tested only against
+   a mock of `hf_space/api/CONTRACT.md`. Call it once for real.
+3. No Alembic migrations yet (`create_all`); fine for a fresh database only.
+
+### Open questions (ask the project owner; don't guess)
+
+- Marketplace: which database it provisions, whether the 1 GB limit covers
+  the database, registry push instructions, public URL format for callbacks.
+- Data sharing: is setting `SHARED_DATA_URL` enough as the customer's
+  consent to share source sentences, or add a per-campaign switch?
+
+### Known gaps (not built)
+
+Gold items (`is_gold` column exists), accept/reject counters and priority
+sinking, trusted-review queue for disagreements, login rate limiting,
+customer model translator + SSRF guard, USSD, network/shared HTTP central
+services (interfaces exist; local implementations used), Dockerfile.
+
+---
+
 ## 1. Marketplace constraints (hard limits)
 
 - **Docker image ≤ 1 GB.** No `torch`, `transformers`, model weights or
@@ -143,7 +235,8 @@ by inbound SMS. All timings and amounts come from config, defaults below.
   1. customer-provided speakers, then
   2. network speakers (§7);
   within each group, by accept rate, then least-recently tasked.
-- Each task expires after `SPEAKER_TIMEOUT_MIN = 30`. If fewer than 2 valid
+- Each task expires after `SPEAKER_TIMEOUT_MIN = 30` (a reply after expiry is
+  stored but not paid and not counted, see §15). If fewer than 2 valid
   replies when a wave expires, send the next wave, until
   `campaign.review_deadline` (default 2 h after the campaign starts).
 - **The first 2 valid replies win and split the budget: 50 each.** As soon as
@@ -151,6 +244,7 @@ by inbound SMS. All timings and amounts come from config, defaults below.
   send those speakers a short "Task K7P2 is filled, thank you. No reply
   needed." so nobody works unpaid. Late replies are stored (useful data) but
   not paid. Tell speakers this rule in the opt-in message.
+- A reply with stars < 4 and no correction is not a valid reply (see §15).
 - **Outcome** (*default, flagged as a choice the user can change*):
   - both accept the candidate (stars ≥ 4, no correction), or both corrections
     are identical after normalization → `verified`;
@@ -342,3 +436,47 @@ out, and two speakers reply by SMS within minutes and are paid KSh 50 airtime
 each. They agree, so the verified Kidaw'ida version goes out. The report shows
 the machine draft's score, and one speaker typed SHARE, so that correction
 joins the shared dataset for the next model.
+
+
+## 15. Decisions log (overrides the spec above; newest last)
+
+Decided by the project owner unless marked "default".
+
+- **2026-10-28 Expired tasks:** a reply to a fan-out task after its 30 min
+  expiry is stored (`late`) but **not paid and not counted**. Speakers get a
+  "task expired, no reply needed" SMS when it expires. The trusted speaker's
+  late reply (after 15 min, item still open) still counts as a paid stage-2
+  reply, as in §5 (confirmed).
+- **2026-10-28 Bare low ratings:** stars < 4 with no correction → stored as
+  `no_correction`, **not paid, not counted**. The speaker may send a
+  correction on the same code, which is then paid. From the trusted speaker
+  it moves the item to fan-out at once.
+- **2026-10-28 Unknown or someone else's code** get the same answer;
+  messages from unknown numbers are logged, not answered; duplicate replies
+  are ignored (first stands).
+- **2026-10-28 Swahili pivot.** When the customer gives no Swahili, the
+  machine Swahili is its own review item with the same rules
+  (`REVIEW_MACHINE_SWAHILI`), and Swahili recipients get it only once
+  verified. `speakers.languages` = languages the speaker is comfortable
+  with, **most preferred first**; a speaker reviews into any of them and is
+  shown the source in the first one available. Swahili becomes an available
+  source at its first valid reply. Worked example (the simulate scenario):
+  English-only message; B, C read swh+dav; D reads eng+swh+dav; E reads
+  eng+swh. D gets the Kidaw'ida task (English source), E the Swahili. When
+  E replies, B and C get the Kidaw'ida task with E's Swahili.
+  Default added: one open task per speaker per sentence; target-language
+  items start before the Swahili item.
+- **2026-10-28 Re-translate from reviewed Swahili:** if E changes the
+  Swahili, Space-made drafts are re-made from E's version before B and C are
+  tasked. Each task stores the draft it showed, so ratings compare against
+  what that speaker saw. If the translator returns nothing, the old draft is
+  kept.
+- **2026-10-28 Payout safety (default):** retry airtime only when AT
+  certainly did not pay; ambiguous outcomes become `unknown` for manual
+  reconciliation, never auto-retried.
+- **2026-10-28 Whole-message fallback (default):** if any sentence of a
+  message is not deliverable in the recipient's language, the whole message
+  goes in the fallback (no mixed-language SMS).
+- **2026-10-29 No EN→SW machine translation:** the Space only does swh→dav.
+  For English-only messages the Swahili reviewers translate from scratch and
+  the Kidaw'ida draft is made from their Swahili. Leave it this way.

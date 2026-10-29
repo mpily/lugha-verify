@@ -145,3 +145,9 @@
 - simulate.py PASS incl. report: dav/space 1 reply (3★, chrF 53.9), dav
   re-translated draft 2 replies (5★, low n), swh 1 reply (chrF 91.3).
   129 tests pass.
+
+## 2026-10-29
+- User decision: no EN→SW machine translation; English-only messages keep
+  the translate-from-scratch Swahili path.
+- CLAUDE.md: added §0 (state, quick start, code map, unverified items, open
+  questions, gaps) and §15 (decisions log) so a collaborator can join.
