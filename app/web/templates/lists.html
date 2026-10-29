@@ -1,0 +1,13 @@
+{% extends "base.html" %}{% block body %}
+<h1>Upload recipients</h1>
+<p class="muted">CSV with columns <code>phone, preferred_lang</code> (e.g. <code>0712345678,dav</code>). Uploading the same number again updates its language.</p>
+<form method="post" action="/portal/lists" enctype="multipart/form-data"><input type="hidden" name="csrf" value="{{ csrf }}">
+<label>List name<input name="list_id" required maxlength="64" pattern="[A-Za-z0-9_-]+" value="{{ list_id or '' }}"></label>
+<label>CSV file<input type="file" name="file" accept=".csv,text/csv"></label>
+<label>…or paste CSV<textarea name="csv_text" rows="6"></textarea></label>
+<button>Upload</button></form>
+{% if result %}<p class="ok">{{ result.list_id }}: {{ result.added }} added, {{ result.updated }} updated.
+{% if result.invalid_lines %}Invalid lines: {{ result.invalid_lines|join(", ") }}.{% endif %}</p>{% endif %}
+<h2>Lists</h2>
+{% for l in lists %}<p>{{ l.id }}: {{ l.n }} recipients{% if l.opted_out %} ({{ l.opted_out }} opted out){% endif %}</p>{% else %}<p class="muted">None yet.</p>{% endfor %}
+{% endblock %}

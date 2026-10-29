@@ -82,3 +82,99 @@
   Settings now require PAYOUT_PER_ITEM_KES/2 >= 10 (AT airtime minimum).
   Request format (`recipients` JSON list, "KES 50") written from memory —
   confirm on the first sandbox run.
+- Build step 3b, bulk delivery (`app/bulk.py`, `compose_message` in
+  `app/delivery.py`): `POST /api/lists/{id}/recipients` (CSV `phone,
+  preferred_lang`; bad rows reported by line number only). Bulk campaigns need
+  a `list_id`; review items are created for every review-required language in
+  the list (plus the machine-Swahili pivot when the source is English and no
+  customer Swahili is given); languages with no uploaded candidate get a
+  no-candidate item for now (step 5: ask the translator first). When all items
+  are closed, each recipient gets one SMS (unique per campaign+recipient).
+  Message rule: every sentence passes `choose_delivery_text`; if any sentence
+  would fall back, the WHOLE message goes in the fallback (Swahili only if
+  every sentence has customer or verified Swahili, else the source language).
+  Hypothesis test at message level. Recipients can STOP/YES. Delivery reports
+  update `deliveries.delivery_status` (send result is stored as `sent`, AT's
+  report as e.g. `Success`). Research campaigns end as `done`, no delivery.
+- simulate.py offline: PASS, now including a 6-recipient list (one STOPs):
+  2 Kidaw'ida recipients got the verified text, the Swahili recipient got the
+  English fallback (Swahili had only one reply), nothing unverified sent.
+  104 tests pass.
+- Build step 4, customer portal (`app/web/portal.py`, Jinja2 templates):
+  login with ADMIN_TOKEN (HttpOnly SameSite=Strict cookie holding an HMAC of
+  the token, CSRF value on every form), recipient-list upload (file or
+  paste), speakers (add → opt-in SMS; list with status, accept rate with n,
+  airtime paid), new campaign (bulk: message split into sentences, optional
+  Swahili paired sentence by sentence or kept whole if counts differ;
+  research: CSV `source, lang, candidate` + model name), campaign page
+  (start, per sentence × language state/result, deliveries, airtime total),
+  export CSV/JSONL. No JavaScript; pages < 8 KB; checked at 375 px width
+  (no horizontal scroll). Shared logic moved to `app/services.py` so the
+  REST API and portal call the same code; `GET /api/campaigns/{id}/export`.
+- Consent export (`app/exports.py`, never-cut item): only tasks with SHARE,
+  on closed items, as anonymous records (no phone, speaker id, campaign or
+  task id; stable HMAC record id for de-duplication). Goes to
+  `SHARED_DATA_URL` if the customer set it, else local `shared_data.jsonl`.
+  Runs every 5 min; Hypothesis test that non-consented tasks never appear.
+  Open: shared records include the source sentence the speaker saw (the
+  customer's text). The customer opts in by setting SHARED_DATA_URL; confirm
+  that is enough or add an explicit per-campaign customer switch.
+- 113 tests pass; simulate.py PASS. No login rate limiting yet.
+- Build step 5a, first machine drafts: on start, an item with no uploaded
+  candidate waits in `drafting` while a background job asks the translator
+  (Space: swh→dav only; customer Swahili is used as the input when given).
+  The job runs outside the lock; the Space client retries up to 3 min, then
+  no candidate → speakers translate from scratch. Drafting past the deadline
+  closes as `no_reply`. Each task now records which candidate it showed
+  (`shown_candidate_id`) for per-model reports.
+- English-only messages: the Space has no EN→SW, so the Swahili item starts
+  with no candidate (Swahili reviewers translate from scratch) and the
+  Kidaw'ida draft is made from their Swahili by the re-translation job.
+  Open question for the user: add EN→SW machine translation (Space endpoint
+  in the research repo, or another free service) so the Swahili starts from a
+  draft?
+- Build step 5b, research report (`app/reports.py`): `GET
+  /api/campaigns/{id}/report` (JSON or `?format=csv`), also on the portal
+  campaign page and as a CSV download. Per language × model (the candidate
+  each speaker actually saw): n items, n replies, mean stars (t 95% CI),
+  ≥4-star rate (Wilson), accept-unchanged rate (Wilson), chrF of candidate vs
+  speaker version (accepted = 100), agreement of the first two replies
+  (Wilson); low_n flag at n_items < 5; from-scratch translations counted
+  separately. chrF is our own implementation (no new image dependency),
+  checked equal to sacrebleu on 6 cases (sacrebleu is test-only).
+- simulate.py PASS incl. report: dav/space 1 reply (3★, chrF 53.9), dav
+  re-translated draft 2 replies (5★, low n), swh 1 reply (chrF 91.3).
+  129 tests pass.
+
+## 2026-10-29
+- User decision: no EN→SW machine translation; English-only messages keep
+  the translate-from-scratch Swahili path.
+- CLAUDE.md: added §0 (state, quick start, code map, unverified items, open
+  questions, gaps) and §15 (decisions log) so a collaborator can join.
+- Postgres support: `psycopg[binary]` driver; `postgres://` and
+  `postgresql://` URLs are mapped to the psycopg driver; `pool_pre_ping`.
+  Whole suite runs against Postgres with `TEST_DATABASE_URL=postgresql://...`:
+  129 passed on Postgres 16 (and on SQLite). simulate.py `--db` on
+  Postgres 16: PASS.
+- Alembic: `migrations/` with the initial schema (autogenerated from the
+  models on Postgres 16). On Postgres the app refuses to start unless the
+  schema is at the latest migration ("run `alembic upgrade head`"); SQLite
+  (dev/tests) still creates tables directly. Test: upgrade on a fresh
+  database reproduces the models exactly (SQLite and Postgres), and
+  downgrade works. 131 passed on Postgres, 130 + 1 Postgres-only skip on SQLite.
+  Future schema changes: edit models, then
+  `DATABASE_URL=... alembic revision --autogenerate -m "..."` and commit it.
+- Build step 6 (image): `Dockerfile` multi-stage on python:3.12-slim,
+  non-root, healthcheck; entrypoint migrates then runs one uvicorn process.
+  **Image size 301 MB** (docker image inspect, 2026-10-29). No proxy settings
+  or CA in the image history (optional CA is a BuildKit secret, only for
+  builds behind a TLS-intercepting proxy like this session's).
+  Container tested against Postgres 16: migrated an empty DB on start, health
+  OK, `scripts/smoke.sh` PASS, speaker opt-in / list / campaign start worked;
+  Space unreachable → draft gave up after retries → item started with no
+  candidate; AT unreachable → SMS retried 5× then `failed`; no phone numbers
+  in logs. Test suite also passes on Python 3.12 (CI version), both DBs.
+- CI: `.github/workflows/docker.yml` = the AT-provided build/push steps
+  (image `registry.africastalking.dev/zej2a1/lugha-verify:latest`) behind a
+  test job (SQLite, Postgres service, simulate) and a < 1 GB size check;
+  pushes only on `main`, PRs build without pushing. Not run yet on GitHub.

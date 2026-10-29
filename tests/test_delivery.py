@@ -14,7 +14,7 @@ texts = st.one_of(st.none(), st.text(max_size=20))
        swh=texts, tt=texts, ts=st.sampled_from(STATUSES),
        spec=st.sampled_from(["*", "dav", "dav,kln,luo", "dav,swh"]))
 def test_never_unverified_in_review_language(rl, sl, fl, src, swh, tt, ts, spec):
-    s = make_settings(review_required_langs=spec)
+    s = make_settings(review_required_langs=spec, database_url="sqlite://")
     nr = s.needs_review(rl)
     c = choose_delivery_text(recipient_lang=rl, source_text=src, source_lang=sl,
                              fallback_lang=fl, swahili_text=swh, needs_review=nr,

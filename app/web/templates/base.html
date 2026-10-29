@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{% block title %}Lugha Verify{% endblock %}</title>
+<style>
+body{font:15px/1.4 system-ui,sans-serif;margin:0 auto;max-width:44em;padding:0 12px 2em;color:#111;background:#fff}
+nav{padding:8px 0;border-bottom:1px solid #ccc;margin-bottom:12px}nav a{margin-right:12px}
+h1{font-size:1.3em}h2{font-size:1.1em;margin-top:1.4em}
+table{border-collapse:collapse;width:100%;font-size:14px}td,th{border-bottom:1px solid #ddd;padding:4px;text-align:left;vertical-align:top}
+label{display:block;margin-top:8px}input,select,textarea{font:inherit;width:100%;box-sizing:border-box;padding:6px}
+button{font:inherit;padding:8px 14px;margin-top:10px}
+.err{background:#fde;padding:8px}.ok{background:#dfd;padding:8px}.muted{color:#666}
+.b{display:inline-block;padding:1px 6px;border-radius:3px;background:#eee;font-size:13px}
+.verified{background:#cfc}.unverified,.speaker_corrected{background:#ffd}.no_reply,.machine{background:#eee}
+</style></head><body>
+{% if authed %}<nav><a href="/portal">Home</a><a href="/portal/lists">Lists</a><a href="/portal/speakers">Speakers</a><a href="/portal/campaigns/new">New campaign</a>
+<form method="post" action="/portal/logout" style="display:inline"><input type="hidden" name="csrf" value="{{ csrf }}"><button style="margin:0;padding:2px 8px">Log out</button></form></nav>{% endif %}
+{% if error %}<p class="err">{{ error }}</p>{% endif %}{% if notice %}<p class="ok">{{ notice }}</p>{% endif %}
+{% block body %}{% endblock %}
+</body></html>

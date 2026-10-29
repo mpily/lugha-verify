@@ -46,3 +46,33 @@ def choose_delivery_text(*, recipient_lang: str, source_text: str, source_lang: 
         return DeliveryChoice(translation_text, recipient_lang, False)
     except Exception:  # noqa: BLE001  any surprise -> fallback, never machine text
         return fb
+
+
+@dataclass(frozen=True)
+class SentenceInfo:
+    source_text: str
+    customer_swahili: str | None
+    verified_swahili: str | None
+    translation_text: str | None     # in the recipient's language
+    translation_status: str | None
+
+
+def compose_message(*, recipient_lang: str, source_lang: str, fallback_lang: str,
+                    sentences: list[SentenceInfo],
+                    needs_review_for) -> DeliveryChoice:
+    """Whole message for one recipient. Every sentence goes through
+    choose_delivery_text; if any sentence would fall back, the whole message is
+    sent in the fallback, so nobody gets a mixed-language message."""
+    choices = [choose_delivery_text(
+        recipient_lang=recipient_lang, source_text=s.source_text, source_lang=source_lang,
+        fallback_lang=fallback_lang,
+        swahili_text=s.customer_swahili or s.verified_swahili,
+        needs_review=needs_review_for(recipient_lang, bool(s.customer_swahili)),
+        translation_text=s.translation_text, translation_status=s.translation_status)
+        for s in sentences]
+    if choices and all(not c.was_fallback and c.lang == recipient_lang for c in choices):
+        return DeliveryChoice(" ".join(c.text for c in choices), recipient_lang, False)
+    sw = [s.customer_swahili or s.verified_swahili for s in sentences]
+    if fallback_lang == "swh" and all(sw):
+        return DeliveryChoice(" ".join(sw), "swh", True)
+    return DeliveryChoice(" ".join(s.source_text for s in sentences), source_lang, True)

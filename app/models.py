@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import (JSON, Boolean, DateTime, ForeignKey, Integer, String, Text,
+                        UniqueConstraint)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
@@ -40,6 +41,7 @@ class Recipient(Base):
     phone_enc: Mapped[str] = mapped_column(Text)
     preferred_lang: Mapped[str] = mapped_column(String(8))
     list_id: Mapped[str] = mapped_column(String(64), index=True)
+    opted_out_at: Mapped[datetime | None] = mapped_column(DateTime)
 
 
 class Campaign(Base):
@@ -50,7 +52,9 @@ class Campaign(Base):
     fallback_lang: Mapped[str] = mapped_column(String(8))
     created_at: Mapped[datetime] = mapped_column(DateTime)
     review_deadline: Mapped[datetime] = mapped_column(DateTime)
+    # draft -> running -> delivered (bulk) | done (research)
     status: Mapped[str] = mapped_column(String(16), default="draft")
+    list_id: Mapped[str | None] = mapped_column(String(64))  # bulk mode
 
 
 class SourceText(Base):
@@ -78,7 +82,8 @@ class ReviewItem(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     candidate_id: Mapped[int] = mapped_column(ForeignKey("candidates.id"), index=True)
     lang: Mapped[str] = mapped_column(String(8))
-    # state: new -> trusted -> fanout -> closed
+    # state: [drafting ->] new -> trusted -> fanout -> closed
+    # drafting = waiting for the machine translator before any task goes out
     state: Mapped[str] = mapped_column(String(16), default="new")
     started_at: Mapped[datetime | None] = mapped_column(DateTime)
     closed_at: Mapped[datetime | None] = mapped_column(DateTime)
@@ -111,6 +116,9 @@ class ReviewTask(Base):
     shown_source_text: Mapped[str | None] = mapped_column(Text)
     # The candidate this speaker rated (it can change after re-translation).
     shown_candidate_text: Mapped[str | None] = mapped_column(Text)
+    shown_candidate_id: Mapped[int | None] = mapped_column(ForeignKey("candidates.id"))
+    shown_candidate: Mapped["Candidate | None"] = relationship(foreign_keys=[shown_candidate_id])
+    shared_at: Mapped[datetime | None] = mapped_column(DateTime)  # sent to shared dataset
     item: Mapped[ReviewItem] = relationship(back_populates="tasks")
     speaker: Mapped[Speaker] = relationship()
 
@@ -143,6 +151,7 @@ class Payout(Base):
 
 class Delivery(Base):
     __tablename__ = "deliveries"
+    __table_args__ = (UniqueConstraint("campaign_id", "recipient_id"),)  # once each
     id: Mapped[int] = mapped_column(primary_key=True)
     campaign_id: Mapped[int] = mapped_column(ForeignKey("campaigns.id"), index=True)
     recipient_id: Mapped[int] = mapped_column(ForeignKey("recipients.id"))
@@ -172,6 +181,7 @@ class OutboundSms(Base):
     __tablename__ = "outbound_sms"
     id: Mapped[int] = mapped_column(primary_key=True)
     speaker_id: Mapped[int | None] = mapped_column(ForeignKey("speakers.id"), index=True)
+    delivery_id: Mapped[int | None] = mapped_column(ForeignKey("deliveries.id"), index=True)
     phone_enc: Mapped[str] = mapped_column(Text)
     text: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime)
