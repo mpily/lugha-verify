@@ -269,6 +269,11 @@ class ReviewEngine:
                                 .where(ReviewItem.state.in_(OPEN_STATES))).all()
         for item in items:
             self._advance(item)
+        # a draft that never arrived must not hold the campaign past its deadline
+        for item in self.db.scalars(select(ReviewItem).where(ReviewItem.state == "drafting")):
+            if self.clock() >= self._deadline(item):
+                item.state = "new"
+                self._close_at_deadline(item)
 
     def _advance(self, item: ReviewItem) -> None:
         if item.state not in OPEN_STATES:
