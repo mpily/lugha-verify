@@ -185,3 +185,8 @@
   Also fixed: an item still waiting for its machine draft at the deadline is
   now closed by the tick (before, a stuck draft could hold the campaign).
   132 tests pass; simulate PASS.
+- Demo recorder `scripts/demo/` (demo_server.py = real app + fake AT/Space +
+  controllable clock + simulated-phones page; record.js = Playwright;
+  record.sh → 13 captioned screenshots, webm/mp4/gif). Recorded once: all
+  steps behave as in §14. Kidaw'ida lines in demo.json are placeholders
+  until a speaker supplies the real translation.

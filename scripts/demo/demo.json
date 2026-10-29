@@ -1,0 +1,19 @@
+{
+  "_note": "Demo script data. The Kidaw'ida lines are PLACEHOLDERS: replace them with a translation from a native speaker before showing the video publicly, then re-run record.sh. Never invent Kidaw'ida.",
+  "message_eng": "Free cholera vaccination at the health centre on Saturday, 8am to 4pm.",
+  "message_swh": "Chanjo ya bure ya kipindupindu katika kituo cha afya Jumamosi, saa mbili asubuhi hadi saa kumi jioni.",
+  "dav_machine_draft": "[Kidaw'ida machine draft - placeholder]",
+  "dav_speaker_version": "[Kidaw'ida as corrected by speakers - placeholder]",
+  "recipients": [
+    {"name": "Amina", "phone": "+254711000101", "lang": "eng"},
+    {"name": "Baraka", "phone": "+254711000102", "lang": "swh"},
+    {"name": "Mwakio", "phone": "+254711000103", "lang": "dav"},
+    {"name": "Wakesho", "phone": "+254711000104", "lang": "dav"}
+  ],
+  "speakers": [
+    {"name": "Mama Shali", "role": "trusted reviewer", "phone": "+254711000201", "languages": ["swh", "dav"], "trusted_for": ["dav"]},
+    {"name": "Mghendi", "role": "reviewer", "phone": "+254711000202", "languages": ["swh", "dav"]},
+    {"name": "Kidenyi", "role": "reviewer", "phone": "+254711000203", "languages": ["eng", "swh", "dav"]},
+    {"name": "Mwanjala", "role": "reviewer", "phone": "+254711000204", "languages": ["swh", "dav"]}
+  ]
+}
