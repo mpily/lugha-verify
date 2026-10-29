@@ -15,7 +15,7 @@ from app.review.engine import ReviewEngine
 
 T0 = datetime(2026, 10, 29, 9, 0, 0)
 # Set TEST_DATABASE_URL=postgresql://... to run the suite against Postgres.
-TEST_DB = os.environ.get("TEST_DATABASE_URL", "sqlite://")
+TEST_DB = os.environ.get("TEST_DATABASE_URL") or "sqlite://"
 
 
 def reset_db() -> None:

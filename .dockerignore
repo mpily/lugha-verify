@@ -1,0 +1,17 @@
+.git
+.github
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.hypothesis
+.env
+.env.*
+*.db
+shared_data.jsonl
+tests
+scripts
+docs
+*.md
+requirements-dev.txt
+Dockerfile
+.dockerignore
